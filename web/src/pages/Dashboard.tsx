@@ -64,9 +64,77 @@ type JobSummary = {
   low_entropy?: boolean;
   polymorphic_mode?: boolean;
   protections?: string[];
+  pass_metrics?: PassMetric[];
+  size_impact?: SizeImpact;
+  compatibility_report?: CompatibilityReport;
+  strength_score?: StrengthScore;
+  retry_suggestions?: RetrySuggestion[];
   input_key: string;
   output_key?: string;
   error?: string;
+};
+
+type PassMetric = {
+  name: string;
+  duration_ms: number;
+  success: boolean;
+  error?: string;
+  size_delta_bytes?: number;
+};
+
+type SizeImpact = {
+  input_bytes: number;
+  output_bytes: number;
+  pass_deltas?: Record<string, number>;
+};
+
+type CompatibilityReport = {
+  status: string;
+  mode?: string;
+  exit_code?: number;
+  timed_out?: boolean;
+  stdout_snippet?: string;
+  stderr_snippet?: string;
+  notes?: string;
+};
+
+type StrengthScore = {
+  score: number;
+  band: string;
+  time_estimate?: string;
+};
+
+type RetrySuggestion = {
+  label: string;
+  reason?: string;
+  tier?: string;
+  low_entropy?: boolean;
+  polymorphic_mode?: boolean;
+  protections?: string[];
+};
+
+type ThreatIntelStatus = {
+  enabled?: boolean;
+  submitted?: boolean;
+  job_id?: string;
+  sample_hash?: string;
+  provider?: string;
+  provider_submission?: string;
+  status?: string;
+  analysis_status?: string;
+  detected_count?: number;
+  engine_count?: number;
+  verdict_ratio?: number;
+  last_error?: string;
+};
+
+type TechniqueFlag = {
+  technique_key: string;
+  severity: string;
+  reason: string;
+  state: string;
+  last_detected_ratio: number;
+  last_sample_count: number;
 };
 
 function fileNameFromKey(key: string): string {
@@ -78,6 +146,17 @@ function hasExactProtections(actual: string[], expected: string[]): boolean {
   if (actual.length !== expected.length) return false;
   const set = new Set(actual);
   return expected.every((v) => set.has(v));
+}
+
+function buildVirusTotalUrl(s?: ThreatIntelStatus): string | null {
+  if (!s || s.provider !== 'virustotal') return null;
+  if (s.provider_submission) {
+    return `https://www.virustotal.com/gui/analysis/${encodeURIComponent(s.provider_submission)}`;
+  }
+  if (s.sample_hash) {
+    return `https://www.virustotal.com/gui/file/${encodeURIComponent(s.sample_hash)}/detection`;
+  }
+  return null;
 }
 
 export default function Dashboard() {
@@ -98,6 +177,10 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [intelByJob, setIntelByJob] = useState<Record<string, ThreatIntelStatus>>({});
+  const [intelFlags, setIntelFlags] = useState<TechniqueFlag[]>([]);
+  const [intelSubmittingJobId, setIntelSubmittingJobId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const supportsAdvancedTechniques = PRO_OR_ENTERPRISE_TIERS.has(selectedTier);
   const supportsPolymorphicMode = PRO_OR_ENTERPRISE_TIERS.has(selectedTier);
@@ -126,6 +209,47 @@ export default function Dashboard() {
       setJobsLoading(false);
     }
   }, [authFetch]);
+
+  const fetchThreatIntelFlags = useCallback(async () => {
+    try {
+      const r = await authFetch(`${API}/threat-intel/flags`);
+      if (!r.ok) return;
+      const d = await r.json();
+      setIntelFlags(Array.isArray(d.flags) ? d.flags : []);
+    } catch {
+      setIntelFlags([]);
+    }
+  }, [authFetch]);
+
+  const fetchThreatIntelStatus = useCallback(async (jobIdValue: string) => {
+    try {
+      const r = await authFetch(`${API}/jobs/${jobIdValue}/threat-intel`);
+      if (!r.ok) return;
+      const d = await r.json();
+      setIntelByJob((prev) => ({ ...prev, [jobIdValue]: d }));
+    } catch {
+      // ignore
+    }
+  }, [authFetch]);
+
+  const submitThreatIntel = useCallback(async (jobIdValue: string) => {
+    setIntelSubmittingJobId(jobIdValue);
+    try {
+      const r = await authFetch(`${API}/jobs/${jobIdValue}/threat-intel/submit`, { method: 'POST' });
+      if (!r.ok) {
+        const msg = await apiErrorFromResponse(r, 'Threat-intel submission failed');
+        setError(msg);
+        return;
+      }
+      const d = await r.json();
+      setIntelByJob((prev) => ({ ...prev, [jobIdValue]: d }));
+      fetchThreatIntelFlags();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Threat-intel submission failed');
+    } finally {
+      setIntelSubmittingJobId(null);
+    }
+  }, [authFetch, fetchThreatIntelFlags]);
 
   const buildProtectionPayload = useCallback(() => {
     const p = supportsAdvancedTechniques ? [...selectedProtections] : [];
@@ -327,21 +451,27 @@ export default function Dashboard() {
     return buildProtectionPayload();
   }, [buildProtectionPayload]);
 
-  const handleRetryJob = useCallback(async (j: JobSummary) => {
+  const handleRetryJob = useCallback(async (j: JobSummary, suggestion?: RetrySuggestion) => {
     if (j.status !== 'failed' || !j.input_key) return;
     setRetryingId(j.job_id);
     setError(null);
     try {
+      const nextTier = suggestion?.tier || j.tier || 'basic';
+      const nextLowEntropy = suggestion?.low_entropy ?? j.low_entropy ?? lowEntropy;
+      const nextPolymorphic = suggestion?.polymorphic_mode ?? j.polymorphic_mode ?? polymorphicMode;
+      const nextProtections = suggestion?.protections && suggestion.protections.length > 0
+        ? suggestion.protections
+        : mergeRetryProtections(j.protections);
       const jobRes = await authFetch(`${API}/jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input_key: j.input_key,
-          tier: j.tier || 'basic',
+          tier: nextTier,
           binary_type: 'auto',
-          low_entropy: j.low_entropy ?? lowEntropy,
-          polymorphic_mode: j.polymorphic_mode ?? polymorphicMode,
-          protections: mergeRetryProtections(j.protections),
+          low_entropy: nextLowEntropy,
+          polymorphic_mode: nextPolymorphic,
+          protections: nextProtections,
         }),
       });
       if (!jobRes.ok) {
@@ -350,7 +480,7 @@ export default function Dashboard() {
       }
       const jobData = await jobRes.json();
       setJobId(jobData.job_id);
-      setSelectedTier(j.tier || 'basic');
+      setSelectedTier(nextTier);
       setStatus('queued');
       setProgress(0);
       setJobError(null);
@@ -434,7 +564,17 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchJobs();
+    fetchThreatIntelFlags();
   }, [fetchJobs]);
+
+  useEffect(() => {
+    const completedJobs = displayJobs.filter((j) => j.status === 'completed' || j.status === 'failed');
+    completedJobs.slice(0, 12).forEach((j) => {
+      if (!intelByJob[j.job_id]) {
+        fetchThreatIntelStatus(j.job_id);
+      }
+    });
+  }, [displayJobs, intelByJob, fetchThreatIntelStatus]);
 
   useEffect(() => {
     if (lowEntropy) setPolymorphicMode(false);
@@ -524,6 +664,19 @@ export default function Dashboard() {
                 transition: 'width 0.3s',
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {intelFlags.length > 0 && (
+        <div style={{ marginBottom: '1rem', padding: '0.85rem', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-muted)' }}>
+          <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Threat Intel Flags</div>
+          <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+            {intelFlags.slice(0, 6).map((f) => (
+              <div key={`${f.technique_key}-${f.state}`}>
+                <strong>{f.technique_key || 'unknown-technique'}</strong> · {f.severity || 'unknown'} · ratio {Number.isFinite(f.last_detected_ratio) ? (f.last_detected_ratio * 100).toFixed(0) : '0'}% · n={Number.isFinite(f.last_sample_count) ? f.last_sample_count : 0} · {f.state || 'unknown'}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -893,8 +1046,87 @@ export default function Dashboard() {
                   {j.protections && j.protections.length > 0 && ` · ${j.protections.length} opt-ins`}
                   {j.error && ` · ${j.error}`}
                 </div>
+                {expandedJobId === j.job_id && (
+                  <div style={{ marginTop: '0.45rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    <div>
+                      Job: <strong>{j.job_id}</strong>
+                    </div>
+                    <div>
+                      Status: <strong>{j.status}</strong>
+                      {typeof j.progress === 'number' && ` · ${j.progress}%`}
+                    </div>
+                    {j.strength_score && (
+                      <div>
+                        Strength: <strong>{j.strength_score.score}/100 ({j.strength_score.band})</strong>
+                        {j.strength_score.time_estimate && ` · ${j.strength_score.time_estimate}`}
+                      </div>
+                    )}
+                    {j.compatibility_report && (
+                      <div>
+                        Compatibility: <strong>{j.compatibility_report.status}</strong>
+                        {j.compatibility_report.mode && ` (${j.compatibility_report.mode})`}
+                        {typeof j.compatibility_report.exit_code === 'number' && ` · exit ${j.compatibility_report.exit_code}`}
+                        {j.compatibility_report.timed_out && ' · timeout'}
+                      </div>
+                    )}
+                    {j.size_impact && (
+                      <div>
+                        Size impact: in {j.size_impact.input_bytes || 0} bytes → out {j.size_impact.output_bytes || 0} bytes
+                      </div>
+                    )}
+                    {j.pass_metrics && j.pass_metrics.length > 0 && (
+                      <div style={{ marginTop: '0.3rem' }}>
+                        Passes: {j.pass_metrics.slice(0, 6).map((m) => `${m.name} ${m.duration_ms}ms${m.success ? '' : ' (fail)'}`).join(' · ')}
+                      </div>
+                    )}
+                    {j.compatibility_report?.notes && (
+                      <div style={{ marginTop: '0.3rem' }}>{j.compatibility_report.notes}</div>
+                    )}
+                    {intelByJob[j.job_id]?.submitted && (
+                      <div style={{ marginTop: '0.3rem' }}>
+                        Threat intel: <strong>{intelByJob[j.job_id]?.status || intelByJob[j.job_id]?.analysis_status || 'pending'}</strong>
+                        {typeof intelByJob[j.job_id]?.detected_count === 'number' && ` · detected ${intelByJob[j.job_id]?.detected_count}/${intelByJob[j.job_id]?.engine_count ?? 0}`}
+                        {intelByJob[j.job_id]?.sample_hash && ` · sha256 ${intelByJob[j.job_id]?.sample_hash?.slice(0, 12)}...`}
+                        {buildVirusTotalUrl(intelByJob[j.job_id]) && (
+                          <>
+                            {' '}·{' '}
+                            <a
+                              href={buildVirusTotalUrl(intelByJob[j.job_id]) as string}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: 'var(--accent)' }}
+                              title="Open VirusTotal result"
+                            >
+                              Open VT
+                            </a>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {!j.strength_score && !j.compatibility_report && !j.size_impact && (!j.pass_metrics || j.pass_metrics.length === 0) && (
+                      <div style={{ marginTop: '0.3rem' }}>
+                        No observability details are available for this job yet. New jobs will include pass metrics, compatibility, and strength score.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  onClick={() => setExpandedJobId((prev) => prev === j.job_id ? null : j.job_id)}
+                  style={{
+                    padding: '0.4rem 0.75rem',
+                    background: 'var(--bg-muted)',
+                    color: 'var(--text)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    fontSize: '0.875rem',
+                    cursor: 'pointer',
+                  }}
+                  title="Toggle details"
+                >
+                  {expandedJobId === j.job_id ? 'Hide details' : 'Details'}
+                </button>
                 <button
                   onClick={() => handleDeleteJob(j.job_id)}
                   style={{
@@ -927,23 +1159,79 @@ export default function Dashboard() {
                     Download
                   </button>
                 )}
-                {j.status === 'failed' && (
+                {j.status === 'completed' && (
                   <button
-                    onClick={() => handleRetryJob(j)}
-                    disabled={retryingId === j.job_id}
+                    onClick={() => submitThreatIntel(j.job_id)}
+                    disabled={intelSubmittingJobId === j.job_id || intelByJob[j.job_id]?.submitted}
                     style={{
                       padding: '0.4rem 0.75rem',
-                      background: 'var(--bg-muted)',
+                      background: intelByJob[j.job_id]?.submitted ? 'var(--bg-muted)' : 'transparent',
                       color: 'var(--text)',
                       border: '1px solid var(--border)',
                       borderRadius: 6,
-                      fontSize: '0.875rem',
-                      fontWeight: 600,
-                      cursor: retryingId === j.job_id ? 'wait' : 'pointer',
+                      fontSize: '0.82rem',
+                      cursor: intelSubmittingJobId === j.job_id ? 'wait' : 'pointer',
                     }}
+                    title="Manual opt-in threat intelligence submission"
                   >
-                    {retryingId === j.job_id ? 'Retrying...' : 'Retry'}
+                    {intelByJob[j.job_id]?.submitted ? 'Intel submitted' : intelSubmittingJobId === j.job_id ? 'Submitting…' : 'Submit to Threat Intel'}
                   </button>
+                )}
+                {j.status === 'completed' && intelByJob[j.job_id]?.submitted && buildVirusTotalUrl(intelByJob[j.job_id]) && (
+                  <button
+                    onClick={() => window.open(buildVirusTotalUrl(intelByJob[j.job_id]) as string, '_blank', 'noopener,noreferrer')}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      background: 'transparent',
+                      color: 'var(--accent)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      fontSize: '0.82rem',
+                      cursor: 'pointer',
+                    }}
+                    title="Open VirusTotal result page"
+                  >
+                    Open VT
+                  </button>
+                )}
+                {j.status === 'failed' && (
+                  <>
+                    <button
+                      onClick={() => handleRetryJob(j)}
+                      disabled={retryingId === j.job_id}
+                      style={{
+                        padding: '0.4rem 0.75rem',
+                        background: 'var(--bg-muted)',
+                        color: 'var(--text)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 6,
+                        fontSize: '0.875rem',
+                        fontWeight: 600,
+                        cursor: retryingId === j.job_id ? 'wait' : 'pointer',
+                      }}
+                    >
+                      {retryingId === j.job_id ? 'Retrying...' : 'Retry'}
+                    </button>
+                    {j.retry_suggestions && j.retry_suggestions.length > 0 && (
+                      <button
+                        onClick={() => handleRetryJob(j, j.retry_suggestions?.[0])}
+                        disabled={retryingId === j.job_id}
+                        style={{
+                          padding: '0.4rem 0.75rem',
+                          background: 'var(--accent)',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 6,
+                          fontSize: '0.82rem',
+                          fontWeight: 600,
+                          cursor: retryingId === j.job_id ? 'wait' : 'pointer',
+                        }}
+                        title={j.retry_suggestions?.[0]?.reason || 'Retry with suggested fix'}
+                      >
+                        Suggested retry
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>

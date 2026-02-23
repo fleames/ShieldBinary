@@ -38,6 +38,22 @@ type Config struct {
 	// Native PE loader stub path (for packing native binaries)
 	NativeLoaderPath string `mapstructure:"native_loader_path"`
 
+	// Compatibility check (post-protection verification)
+	EnableCompatCheck     bool   `mapstructure:"enable_compat_check"`
+	CompatCheckMode       string `mapstructure:"compat_check_mode"` // container
+	CompatCheckTimeoutSec int    `mapstructure:"compat_check_timeout_sec"`
+	CompatOutputMaxBytes  int    `mapstructure:"compat_output_max_bytes"`
+
+	// Threat intelligence (manual opt-in; VirusTotal first)
+	EnableThreatIntel           bool   `mapstructure:"enable_threat_intel"`
+	ThreatIntelProvider         string `mapstructure:"threat_intel_provider"`
+	ThreatIntelPollIntervalSec  int    `mapstructure:"threat_intel_poll_interval_sec"`
+	ThreatIntelLookupTimeoutSec int    `mapstructure:"threat_intel_lookup_timeout_sec"`
+	ThreatIntelMaxSampleBytes   int64  `mapstructure:"threat_intel_max_sample_bytes"`
+	VTAPIKey                    string `mapstructure:"vt_api_key"`
+	VTBaseURL                   string `mapstructure:"vt_base_url"`
+	VTMaxRetries                int    `mapstructure:"vt_max_retries"`
+
 	// Auth
 	JWTSecret     string `mapstructure:"jwt_secret"`
 	JWTExpireMins int    `mapstructure:"jwt_expire_mins"`
@@ -47,8 +63,8 @@ type Config struct {
 	WebRoot string `mapstructure:"web_root"`
 
 	// Rate limiting (0 = disabled)
-	RateLimitJobsPerHour    int `mapstructure:"rate_limit_jobs_per_hour"`
-	RateLimitAuthPer15Min   int `mapstructure:"rate_limit_auth_per_15min"`
+	RateLimitJobsPerHour  int `mapstructure:"rate_limit_jobs_per_hour"`
+	RateLimitAuthPer15Min int `mapstructure:"rate_limit_auth_per_15min"`
 
 	// CORS allowed origins (comma-separated; empty = same-origin only, "*" = allow all)
 	CORSOrigins string `mapstructure:"cors_origins"`
@@ -76,10 +92,21 @@ func Load() (*Config, error) {
 	viper.SetDefault("database_path", "./shieldbinary.db")
 	viper.SetDefault("rate_limit_jobs_per_hour", 100)
 	viper.SetDefault("rate_limit_auth_per_15min", 10)
-	viper.SetDefault("cors_origins", "")       // empty = same-origin only; set "*" for dev or "https://app.example.com" for prod
-	viper.SetDefault("engine_safe_pro", false)       // Pro tier: use minimal pass set (Basic + AntiILDASMPass) for stability
-	viper.SetDefault("engine_virtualization", true)  // Enterprise tier: IL virtualization (VMProtect-style); set false to disable
-	viper.SetDefault("engine_low_entropy", false)    // Use deterministic encoding to lower output entropy
+	viper.SetDefault("cors_origins", "")            // empty = same-origin only; set "*" for dev or "https://app.example.com" for prod
+	viper.SetDefault("engine_safe_pro", false)      // Pro tier: use minimal pass set (Basic + AntiILDASMPass) for stability
+	viper.SetDefault("engine_virtualization", true) // Enterprise tier: IL virtualization (VMProtect-style); set false to disable
+	viper.SetDefault("engine_low_entropy", false)   // Use deterministic encoding to lower output entropy
+	viper.SetDefault("enable_compat_check", true)
+	viper.SetDefault("compat_check_mode", "container")
+	viper.SetDefault("compat_check_timeout_sec", 12)
+	viper.SetDefault("compat_output_max_bytes", 1200)
+	viper.SetDefault("enable_threat_intel", false)
+	viper.SetDefault("threat_intel_provider", "virustotal")
+	viper.SetDefault("threat_intel_poll_interval_sec", 30)
+	viper.SetDefault("threat_intel_lookup_timeout_sec", 20)
+	viper.SetDefault("threat_intel_max_sample_bytes", 30*1024*1024)
+	viper.SetDefault("vt_base_url", "https://www.virustotal.com/api/v3")
+	viper.SetDefault("vt_max_retries", 2)
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -117,6 +144,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("SHIELD_CORS_ORIGINS"); v != "" {
 		cfg.CORSOrigins = v
+	}
+	if v := os.Getenv("SHIELD_VT_API_KEY"); v != "" {
+		cfg.VTAPIKey = v
 	}
 	if v := os.Getenv("SHIELD_RATE_LIMIT_JOBS_PER_HOUR"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

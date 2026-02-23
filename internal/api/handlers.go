@@ -347,18 +347,27 @@ func (s *Server) handleListJobs(c *gin.Context) {
 		if err != nil || job == nil {
 			continue
 		}
+		retrySuggestions := job.RetrySuggestions
+		if len(retrySuggestions) == 0 && (job.Status == "failed" || (job.CompatibilityReport != nil && job.CompatibilityReport.Status == "incompatible")) {
+			retrySuggestions = defaultRetrySuggestions(job)
+		}
 		jobs = append(jobs, gin.H{
-			"job_id":           job.ID,
-			"status":           job.Status,
-			"progress":         job.Progress,
-			"tier":             job.Tier,
-			"binary_type":      job.BinaryType,
-			"low_entropy":      job.LowEntropy,
-			"polymorphic_mode": job.Polymorphic,
-			"protections":      job.Protections,
-			"input_key":        job.InputKey,
-			"output_key":       job.OutputKey,
-			"error":            job.Error,
+			"job_id":               job.ID,
+			"status":               job.Status,
+			"progress":             job.Progress,
+			"tier":                 job.Tier,
+			"binary_type":          job.BinaryType,
+			"low_entropy":          job.LowEntropy,
+			"polymorphic_mode":     job.Polymorphic,
+			"protections":          job.Protections,
+			"pass_metrics":         job.PassMetrics,
+			"size_impact":          job.SizeImpact,
+			"compatibility_report": job.CompatibilityReport,
+			"strength_score":       job.StrengthScore,
+			"retry_suggestions":    retrySuggestions,
+			"input_key":            job.InputKey,
+			"output_key":           job.OutputKey,
+			"error":                job.Error,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"jobs": jobs})
@@ -391,19 +400,28 @@ func (s *Server) handleGetJob(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 		return
 	}
+	retrySuggestions := job.RetrySuggestions
+	if len(retrySuggestions) == 0 && (job.Status == "failed" || (job.CompatibilityReport != nil && job.CompatibilityReport.Status == "incompatible")) {
+		retrySuggestions = defaultRetrySuggestions(job)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"job_id":           job.ID,
-		"status":           job.Status,
-		"progress":         job.Progress,
-		"tier":             job.Tier,
-		"binary_type":      job.BinaryType,
-		"low_entropy":      job.LowEntropy,
-		"polymorphic_mode": job.Polymorphic,
-		"protections":      job.Protections,
-		"input_key":        job.InputKey,
-		"output_key":       job.OutputKey,
-		"error":            job.Error,
+		"job_id":               job.ID,
+		"status":               job.Status,
+		"progress":             job.Progress,
+		"tier":                 job.Tier,
+		"binary_type":          job.BinaryType,
+		"low_entropy":          job.LowEntropy,
+		"polymorphic_mode":     job.Polymorphic,
+		"protections":          job.Protections,
+		"pass_metrics":         job.PassMetrics,
+		"size_impact":          job.SizeImpact,
+		"compatibility_report": job.CompatibilityReport,
+		"strength_score":       job.StrengthScore,
+		"retry_suggestions":    retrySuggestions,
+		"input_key":            job.InputKey,
+		"output_key":           job.OutputKey,
+		"error":                job.Error,
 	})
 }
 
@@ -420,6 +438,58 @@ func sanitizeProtections(in []string) []string {
 		}
 		seen[k] = true
 		out = append(out, k)
+	}
+	return out
+}
+
+func defaultRetrySuggestions(job *queue.JobPayload) []queue.RetrySuggestion {
+	var suggestions []queue.RetrySuggestion
+	switch strings.ToLower(job.Tier) {
+	case "enterprise":
+		suggestions = append(suggestions, queue.RetrySuggestion{
+			Label:       "Downgrade to pro",
+			Reason:      "reduce aggressive transformations",
+			Tier:        "pro",
+			LowEntropy:  job.LowEntropy,
+			Polymorphic: false,
+			Protections: filterRetryProtections(job.Protections),
+		})
+		fallthrough
+	case "pro":
+		suggestions = append(suggestions, queue.RetrySuggestion{
+			Label:       "Downgrade to basic",
+			Reason:      "use compatibility-focused profile",
+			Tier:        "basic",
+			LowEntropy:  true,
+			Polymorphic: false,
+			Protections: []string{},
+		})
+	}
+	if len(suggestions) == 0 {
+		suggestions = []queue.RetrySuggestion{{
+			Label:       "Retry with safe defaults",
+			Reason:      "minimal compatibility profile",
+			Tier:        "basic",
+			LowEntropy:  true,
+			Polymorphic: false,
+			Protections: []string{},
+		}}
+	}
+	return suggestions
+}
+
+func filterRetryProtections(in []string) []string {
+	block := map[string]bool{
+		"anti_decompiler_aggressive": true,
+		"invalid_metadata":           true,
+		"local_var_promotion":        true,
+	}
+	var out []string
+	for _, p := range in {
+		key := strings.ToLower(strings.TrimSpace(p))
+		if !block[key] {
+			out = append(out, p)
+		}
 	}
 	return out
 }

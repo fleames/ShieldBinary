@@ -111,6 +111,8 @@ Dashboard flow:
 6. Watch progress.
 7. Download result or retry failed job.
 8. Review job history.
+9. Expand details for pass metrics, compatibility report, and strength score.
+10. (Optional) submit completed output to threat-intel and review technique flags.
 
 Tier-aware UI behavior:
 
@@ -179,6 +181,12 @@ Important fields persisted in `internal/queue.JobPayload` and hash:
 - `low_entropy`
 - `polymorphic_mode`
 - `protections` (JSON string array)
+- `pass_metrics` (JSON array: per-pass duration, success, error, size delta)
+- `size_impact` (JSON object: input bytes, output bytes, pass deltas)
+- `compatibility_report` (JSON object: mode/status/exit snippets/timeout)
+- `strength_score` (JSON object: score, qualitative band, analyst-time estimate)
+- `retry_suggestions` (JSON array: ranked safe fallback configs)
+- threat-intel sample/result metadata persisted in SQLite (`intel_samples`, `intel_results`, `technique_signals`, `technique_flags`)
 
 ## 10) Security and safety controls
 

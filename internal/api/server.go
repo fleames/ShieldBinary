@@ -11,6 +11,7 @@ import (
 	"github.com/shieldbinary/backend/internal/queue"
 	"github.com/shieldbinary/backend/internal/ratelimit"
 	"github.com/shieldbinary/backend/internal/storage"
+	"github.com/shieldbinary/backend/internal/threatintel"
 	"go.uber.org/zap"
 )
 
@@ -36,13 +37,15 @@ var swaggerUIHTML = []byte(`<!DOCTYPE html>
 </html>`)
 
 type Server struct {
-	cfg        *config.Config
-	logger     *zap.Logger
-	router     *gin.Engine
-	storage    storage.Storage
-	queue      *queue.Queue
-	authStore  *auth.Store
+	cfg         *config.Config
+	logger      *zap.Logger
+	router      *gin.Engine
+	storage     storage.Storage
+	queue       *queue.Queue
+	authStore   *auth.Store
 	rateLimiter *ratelimit.Limiter
+	intelStore  *threatintel.Store
+	intelClient threatintel.Client
 }
 
 func NewServer(cfg *config.Config, logger *zap.Logger, store storage.Storage, q *queue.Queue, authStore *auth.Store, rl *ratelimit.Limiter) *Server {
@@ -58,7 +61,20 @@ func NewServer(cfg *config.Config, logger *zap.Logger, store storage.Storage, q 
 	r.Use(corsMiddleware(cfg.CORSOrigins))
 	r.Use(requestLogger(logger))
 
-	s := &Server{cfg: cfg, logger: logger, router: r, storage: store, queue: q, authStore: authStore, rateLimiter: rl}
+	var intelStore *threatintel.Store
+	var intelClient threatintel.Client
+	if cfg.EnableThreatIntel {
+		if tiStore, err := threatintel.NewStore(cfg.DatabasePath); err == nil {
+			intelStore = tiStore
+			if strings.EqualFold(cfg.ThreatIntelProvider, "virustotal") {
+				intelClient = threatintel.NewVirusTotalClient(cfg)
+			}
+		} else {
+			logger.Warn("threat intel disabled: store init failed", zap.Error(err))
+		}
+	}
+
+	s := &Server{cfg: cfg, logger: logger, router: r, storage: store, queue: q, authStore: authStore, rateLimiter: rl, intelStore: intelStore, intelClient: intelClient}
 	s.routes()
 	return s
 }
@@ -185,6 +201,9 @@ func (s *Server) routes() {
 			protected.GET("/jobs/:id", s.handleGetJob)
 			protected.DELETE("/jobs/:id", s.handleDeleteJob)
 			protected.GET("/jobs/:id/download", s.handleDownloadJob)
+			protected.POST("/jobs/:id/threat-intel/submit", s.handleThreatIntelSubmit)
+			protected.GET("/jobs/:id/threat-intel", s.handleThreatIntelStatus)
+			protected.GET("/threat-intel/flags", s.handleThreatIntelFlags)
 		}
 	}
 }

@@ -17,14 +17,18 @@ import (
 	"github.com/shieldbinary/backend/internal/peutil"
 	"github.com/shieldbinary/backend/internal/queue"
 	"github.com/shieldbinary/backend/internal/storage"
+	"github.com/shieldbinary/backend/internal/threatintel"
 	"go.uber.org/zap"
 )
 
 type Worker struct {
-	cfg     *config.Config
-	logger  *zap.Logger
-	queue   *queue.Queue
-	storage storage.Storage
+	cfg           *config.Config
+	logger        *zap.Logger
+	queue         *queue.Queue
+	storage       storage.Storage
+	intelStore    *threatintel.Store
+	intelClient   threatintel.Client
+	intelAnalyzer *threatintel.Analyzer
 }
 
 func New(cfg *config.Config, logger *zap.Logger) (*Worker, error) {
@@ -37,14 +41,42 @@ func New(cfg *config.Config, logger *zap.Logger) (*Worker, error) {
 		q.Close()
 		return nil, err
 	}
-	return &Worker{cfg: cfg, logger: logger, queue: q, storage: store}, nil
+	var intelStore *threatintel.Store
+	var intelClient threatintel.Client
+	var intelAnalyzer *threatintel.Analyzer
+	if cfg.EnableThreatIntel {
+		if tiStore, err := threatintel.NewStore(cfg.DatabasePath); err == nil {
+			intelStore = tiStore
+			intelAnalyzer = threatintel.NewAnalyzer(tiStore)
+			if strings.EqualFold(cfg.ThreatIntelProvider, "virustotal") {
+				intelClient = threatintel.NewVirusTotalClient(cfg)
+			}
+		} else {
+			logger.Warn("threat intel disabled in worker: store init failed", zap.Error(err))
+		}
+	}
+	return &Worker{
+		cfg:           cfg,
+		logger:        logger,
+		queue:         q,
+		storage:       store,
+		intelStore:    intelStore,
+		intelClient:   intelClient,
+		intelAnalyzer: intelAnalyzer,
+	}, nil
 }
 
 func (w *Worker) Close() error {
+	if w.intelStore != nil {
+		_ = w.intelStore.Close()
+	}
 	return w.queue.Close()
 }
 
 func (w *Worker) Run(ctx context.Context) error {
+	if w.cfg.EnableThreatIntel {
+		go w.runThreatIntelPoller(ctx)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -134,9 +166,12 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 	// #endregion
 
 	detectedType := "native"
+	var obs *engineObservability
 	if isDotNet {
 		// Run .NET engine
-		if err := w.runDotNetEngine(ctx, job.ID, workDir, inputPath, outputPath, job.Tier, job.LowEntropy, job.Polymorphic, job.Protections); err != nil {
+		o, err := w.runDotNetEngine(ctx, job.ID, workDir, inputPath, outputPath, job.Tier, job.LowEntropy, job.Polymorphic, job.Protections)
+		obs = o
+		if err != nil {
 			// Engine may reject mixed/edge-case PEs; fall back to native packer
 			if strings.Contains(err.Error(), "not a .NET assembly") && runtime.GOOS == "windows" {
 				if valid, ve := peutil.IsValidPE(inputPath); ve == nil && valid {
@@ -175,6 +210,25 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 		}
 	}
 
+	if obs != nil {
+		if len(obs.PassMetrics) > 0 {
+			_ = w.queue.SetPassMetrics(ctx, job.ID, obs.PassMetrics)
+		}
+		if obs.SizeImpact != nil {
+			_ = w.queue.SetSizeImpact(ctx, job.ID, obs.SizeImpact)
+		}
+	}
+	compat := w.runCompatibilityCheck(ctx, outputPath, detectedType)
+	_ = w.queue.SetCompatibilityReport(ctx, job.ID, compat)
+	if compat != nil && (compat.Status == "incompatible" || compat.Status == "warning") {
+		_ = w.queue.SetRetrySuggestions(ctx, job.ID, buildRetrySuggestions(job, compat.Notes))
+	}
+	score := buildStrengthScore(job, compat, nil)
+	if obs != nil {
+		score = buildStrengthScore(job, compat, obs.PassMetrics)
+	}
+	_ = w.queue.SetStrengthScore(ctx, job.ID, score)
+
 	_ = w.queue.SetStatus(ctx, job.ID, "uploading", 80)
 
 	// Upload output to storage
@@ -200,7 +254,7 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 	w.logger.Info("job completed", zap.String("job_id", job.ID))
 }
 
-func (w *Worker) runDotNetEngine(ctx context.Context, jobID, workDir, inputPath, outputPath, tier string, lowEntropy bool, polymorphic bool, protections []string) error {
+func (w *Worker) runDotNetEngine(ctx context.Context, jobID, workDir, inputPath, outputPath, tier string, lowEntropy bool, polymorphic bool, protections []string) (*engineObservability, error) {
 	enginePath := w.cfg.EnginePath
 	var useDotnet bool
 	if enginePath == "" {
@@ -218,7 +272,7 @@ func (w *Worker) runDotNetEngine(ctx context.Context, jobID, workDir, inputPath,
 			}
 		}
 		if enginePath == "" {
-			return fmt.Errorf("protection engine not found. Run: dotnet publish engine/ShieldBinary.Engine.csproj -c Release -r win-x64 --self-contained -o bin/engine")
+			return nil, fmt.Errorf("protection engine not found. Run: dotnet publish engine/ShieldBinary.Engine.csproj -c Release -r win-x64 --self-contained -o bin/engine")
 		}
 	} else {
 		useDotnet = strings.HasSuffix(strings.ToLower(enginePath), ".dll")
@@ -251,15 +305,25 @@ func (w *Worker) runDotNetEngine(ctx context.Context, jobID, workDir, inputPath,
 		cmd.Env = append(append([]string{}, os.Environ()...), envAdd...)
 	}
 	out, err := cmd.CombinedOutput()
+	var inputBytes int64
+	if st, statErr := os.Stat(inputPath); statErr == nil {
+		inputBytes = st.Size()
+	}
+	obs := parseEngineTelemetry(string(out), inputBytes)
+	if obs != nil && obs.SizeImpact != nil && obs.SizeImpact.OutputBytes == 0 {
+		if st, statErr := os.Stat(outputPath); statErr == nil {
+			obs.SizeImpact.OutputBytes = st.Size()
+		}
+	}
 	if err != nil {
 		w.logger.Error("engine failed", zap.Error(err), zap.String("output", string(out)))
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
 			msg = err.Error()
 		}
-		return fmt.Errorf("%s", msg)
+		return obs, fmt.Errorf("%s", msg)
 	}
-	return nil
+	return obs, nil
 }
 
 func protectionEnvVars(protections []string) []string {
@@ -374,6 +438,9 @@ func (w *Worker) failJob(ctx context.Context, jobID string, errMsg interface{}) 
 	_ = w.queue.SetStatus(ctx, jobID, "failed", 0)
 	msg := fmt.Sprint(errMsg)
 	_ = w.queue.SetJobError(ctx, jobID, msg)
+	if job, err := w.queue.GetJob(ctx, jobID); err == nil && job != nil {
+		_ = w.queue.SetRetrySuggestions(ctx, jobID, buildRetrySuggestions(job, msg))
+	}
 	w.logger.Error("job failed", zap.String("job_id", jobID), zap.String("error", msg))
 }
 

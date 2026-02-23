@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -20,18 +21,62 @@ const (
 )
 
 type JobPayload struct {
-	ID          string   `json:"id"`
-	UserID      string   `json:"user_id"`
-	InputKey    string   `json:"input_key"`
-	OutputKey   string   `json:"output_key,omitempty"`
-	Tier        string   `json:"tier"`
-	BinaryType  string   `json:"binary_type"`
-	LowEntropy  bool     `json:"low_entropy"`
-	Polymorphic bool     `json:"polymorphic_mode"`
+	ID                  string               `json:"id"`
+	UserID              string               `json:"user_id"`
+	InputKey            string               `json:"input_key"`
+	OutputKey           string               `json:"output_key,omitempty"`
+	Tier                string               `json:"tier"`
+	BinaryType          string               `json:"binary_type"`
+	LowEntropy          bool                 `json:"low_entropy"`
+	Polymorphic         bool                 `json:"polymorphic_mode"`
+	Protections         []string             `json:"protections,omitempty"`
+	PassMetrics         []PassMetric         `json:"pass_metrics,omitempty"`
+	SizeImpact          *SizeImpact          `json:"size_impact,omitempty"`
+	CompatibilityReport *CompatibilityReport `json:"compatibility_report,omitempty"`
+	StrengthScore       *StrengthScore       `json:"strength_score,omitempty"`
+	RetrySuggestions    []RetrySuggestion    `json:"retry_suggestions,omitempty"`
+	Status              string               `json:"status"`
+	Progress            int                  `json:"progress"`
+	Error               string               `json:"error,omitempty"`
+}
+
+type PassMetric struct {
+	Name           string `json:"name"`
+	DurationMs     int64  `json:"duration_ms"`
+	Success        bool   `json:"success"`
+	Error          string `json:"error,omitempty"`
+	SizeDeltaBytes int64  `json:"size_delta_bytes,omitempty"`
+}
+
+type SizeImpact struct {
+	InputBytes  int64            `json:"input_bytes"`
+	OutputBytes int64            `json:"output_bytes"`
+	PassDeltas  map[string]int64 `json:"pass_deltas,omitempty"`
+}
+
+type CompatibilityReport struct {
+	Status        string `json:"status"` // unknown|compatible|warning|incompatible
+	Mode          string `json:"mode"`   // container|local
+	ExitCode      int    `json:"exit_code,omitempty"`
+	TimedOut      bool   `json:"timed_out,omitempty"`
+	StdoutSnippet string `json:"stdout_snippet,omitempty"`
+	StderrSnippet string `json:"stderr_snippet,omitempty"`
+	Notes         string `json:"notes,omitempty"`
+}
+
+type StrengthScore struct {
+	Score        int    `json:"score"` // 0-100
+	Band         string `json:"band"`
+	TimeEstimate string `json:"time_estimate,omitempty"`
+}
+
+type RetrySuggestion struct {
+	Label       string   `json:"label"`
+	Reason      string   `json:"reason,omitempty"`
+	Tier        string   `json:"tier,omitempty"`
+	LowEntropy  bool     `json:"low_entropy,omitempty"`
+	Polymorphic bool     `json:"polymorphic_mode,omitempty"`
 	Protections []string `json:"protections,omitempty"`
-	Status      string   `json:"status"`
-	Progress    int      `json:"progress"`
-	Error       string   `json:"error,omitempty"`
 }
 
 type Queue struct {
@@ -124,16 +169,18 @@ func (q *Queue) SetJobError(ctx context.Context, jobID, errMsg string) error {
 func (q *Queue) StoreJob(ctx context.Context, job *JobPayload) error {
 	key := QueuePrefix + job.ID
 	userJobsKey := UserJobsPrefix + job.UserID + UserJobsSuffix
-	protectionsJSON := "[]"
-	if len(job.Protections) > 0 {
-		if b, err := json.Marshal(job.Protections); err == nil {
-			protectionsJSON = string(b)
-		}
-	}
+	protectionsJSON := marshalOrEmpty(job.Protections)
+	passMetricsJSON := marshalOrEmpty(job.PassMetrics)
+	sizeImpactJSON := marshalOrEmpty(job.SizeImpact)
+	compatJSON := marshalOrEmpty(job.CompatibilityReport)
+	scoreJSON := marshalOrEmpty(job.StrengthScore)
+	retryJSON := marshalOrEmpty(job.RetrySuggestions)
 	pipe := q.client.Pipeline()
 	pipe.HSet(ctx, key, "id", job.ID, "user_id", job.UserID, "input_key", job.InputKey,
 		"tier", job.Tier, "binary_type", job.BinaryType, "status", "queued", "progress", 0,
-		"low_entropy", boolToString(job.LowEntropy), "polymorphic_mode", boolToString(job.Polymorphic), "protections", protectionsJSON)
+		"low_entropy", boolToString(job.LowEntropy), "polymorphic_mode", boolToString(job.Polymorphic),
+		"protections", protectionsJSON, "pass_metrics", passMetricsJSON, "size_impact", sizeImpactJSON,
+		"compatibility_report", compatJSON, "strength_score", scoreJSON, "retry_suggestions", retryJSON)
 	pipe.Expire(ctx, key, time.Duration(JobTTL)*time.Second)
 	pipe.LPush(ctx, userJobsKey, job.ID)
 	pipe.Expire(ctx, userJobsKey, time.Duration(JobTTL)*time.Second)
@@ -161,19 +208,49 @@ func (q *Queue) GetJob(ctx context.Context, jobID string) (*JobPayload, error) {
 		return nil, nil
 	}
 	return &JobPayload{
-		ID:          m["id"],
-		UserID:      m["user_id"],
-		InputKey:    m["input_key"],
-		OutputKey:   m["output_key"],
-		Tier:        m["tier"],
-		BinaryType:  m["binary_type"],
-		LowEntropy:  parseBool(m["low_entropy"]),
-		Polymorphic: parseBool(m["polymorphic_mode"]),
-		Protections: parseStringSliceJSON(m["protections"]),
-		Status:      m["status"],
-		Progress:    parseInt(m["progress"]),
-		Error:       m["error"],
+		ID:                  m["id"],
+		UserID:              m["user_id"],
+		InputKey:            m["input_key"],
+		OutputKey:           m["output_key"],
+		Tier:                m["tier"],
+		BinaryType:          m["binary_type"],
+		LowEntropy:          parseBool(m["low_entropy"]),
+		Polymorphic:         parseBool(m["polymorphic_mode"]),
+		Protections:         parseStringSliceJSON(m["protections"]),
+		PassMetrics:         parsePassMetricsJSON(m["pass_metrics"]),
+		SizeImpact:          parseSizeImpactJSON(m["size_impact"]),
+		CompatibilityReport: parseCompatibilityReportJSON(m["compatibility_report"]),
+		StrengthScore:       parseStrengthScoreJSON(m["strength_score"]),
+		RetrySuggestions:    parseRetrySuggestionsJSON(m["retry_suggestions"]),
+		Status:              m["status"],
+		Progress:            parseInt(m["progress"]),
+		Error:               m["error"],
 	}, nil
+}
+
+func (q *Queue) SetPassMetrics(ctx context.Context, jobID string, passMetrics []PassMetric) error {
+	key := QueuePrefix + jobID
+	return q.client.HSet(ctx, key, "pass_metrics", marshalOrEmpty(passMetrics)).Err()
+}
+
+func (q *Queue) SetSizeImpact(ctx context.Context, jobID string, sizeImpact *SizeImpact) error {
+	key := QueuePrefix + jobID
+	return q.client.HSet(ctx, key, "size_impact", marshalOrEmpty(sizeImpact)).Err()
+}
+
+func (q *Queue) SetCompatibilityReport(ctx context.Context, jobID string, report *CompatibilityReport) error {
+	key := QueuePrefix + jobID
+	return q.client.HSet(ctx, key, "compatibility_report", marshalOrEmpty(report)).Err()
+}
+
+func (q *Queue) SetStrengthScore(ctx context.Context, jobID string, score *StrengthScore) error {
+	key := QueuePrefix + jobID
+	return q.client.HSet(ctx, key, "strength_score", marshalOrEmpty(score)).Err()
+}
+
+func (q *Queue) SetRetrySuggestions(ctx context.Context, jobID string, suggestions []RetrySuggestion) error {
+	key := QueuePrefix + jobID
+	return q.client.HSet(ctx, key, "retry_suggestions", marshalOrEmpty(suggestions)).Err()
 }
 
 func parseInt(s string) int {
@@ -206,6 +283,79 @@ func parseStringSliceJSON(s string) []string {
 		return nil
 	}
 	return out
+}
+
+func parsePassMetricsJSON(s string) []PassMetric {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []PassMetric
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func parseSizeImpactJSON(s string) *SizeImpact {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out SizeImpact
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return &out
+}
+
+func parseCompatibilityReportJSON(s string) *CompatibilityReport {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out CompatibilityReport
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return &out
+}
+
+func parseStrengthScoreJSON(s string) *StrengthScore {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out StrengthScore
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return &out
+}
+
+func parseRetrySuggestionsJSON(s string) []RetrySuggestion {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []RetrySuggestion
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func marshalOrEmpty(v interface{}) string {
+	if v == nil {
+		return "{}"
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Slice && rv.IsNil() {
+		return "[]"
+	}
+	if rv.Kind() == reflect.Ptr && rv.IsNil() {
+		return "{}"
+	}
+	b, err := json.Marshal(v)
+	if err != nil || len(b) == 0 {
+		return "{}"
+	}
+	return string(b)
 }
 
 // DeleteJob removes a job from Redis (hash + user list). Returns the job before deletion for storage cleanup.

@@ -22,6 +22,23 @@ engine_path: ""
 # Path to native PE loader (for packing native binaries; leave empty for bin/loader.exe)
 native_loader_path: ""
 
+# Compatibility launch check
+enable_compat_check: true
+compat_check_mode: container
+compat_check_timeout_sec: 12
+compat_output_max_bytes: 1200
+
+# Threat intelligence (manual opt-in)
+enable_threat_intel: false
+threat_intel_provider: virustotal
+threat_intel_poll_interval_sec: 30
+threat_intel_lookup_timeout_sec: 20
+threat_intel_max_sample_bytes: 31457280
+vt_base_url: https://www.virustotal.com/api/v3
+vt_max_retries: 2
+# Set via env in production:
+# SHIELD_VT_API_KEY=...
+
 jwt_secret: "change-me-in-production"
 jwt_expire_mins: 1440
 database_path: ./shieldbinary.db

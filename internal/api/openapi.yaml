@@ -184,6 +184,11 @@ paths:
                 input_key: { type: string }
                 tier: { type: string, enum: [minimal, basic, pro, enterprise] }
                 binary_type: { type: string, default: auto }
+                low_entropy: { type: boolean, default: false }
+                polymorphic_mode: { type: boolean, default: false }
+                protections:
+                  type: array
+                  items: { type: string }
       responses:
         '202':
           description: Job queued
@@ -265,6 +270,70 @@ paths:
         '400': { description: Job not ready }
         '404': { description: Job not found }
 
+  /jobs/{id}/threat-intel/submit:
+    post:
+      summary: Submit protected output to threat intelligence provider (manual opt-in)
+      tags: [ThreatIntel]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Already submitted or immediate verdict available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThreatIntelJobStatus' }
+        '202':
+          description: Submitted and pending provider analysis
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThreatIntelJobStatus' }
+        '400': { description: Bad request }
+        '404': { description: Job not found }
+
+  /jobs/{id}/threat-intel:
+    get:
+      summary: Get threat intelligence status for a job
+      tags: [ThreatIntel]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Threat intelligence status for this job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThreatIntelJobStatus' }
+        '404': { description: Job not found }
+
+  /threat-intel/flags:
+    get:
+      summary: List technique detection flags
+      tags: [ThreatIntel]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: Flag list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  flags:
+                    type: array
+                    items: { $ref: '#/components/schemas/TechniqueFlag' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -302,9 +371,103 @@ components:
         progress: { type: integer }
         tier: { type: string }
         binary_type: { type: string }
+        low_entropy: { type: boolean }
+        polymorphic_mode: { type: boolean }
+        protections:
+          type: array
+          items: { type: string }
+        pass_metrics:
+          type: array
+          items: { $ref: '#/components/schemas/PassMetric' }
+        size_impact: { $ref: '#/components/schemas/SizeImpact' }
+        compatibility_report: { $ref: '#/components/schemas/CompatibilityReport' }
+        strength_score: { $ref: '#/components/schemas/StrengthScore' }
+        retry_suggestions:
+          type: array
+          items: { $ref: '#/components/schemas/RetrySuggestion' }
         input_key: { type: string }
         output_key: { type: string }
         error: { type: string }
+
+    PassMetric:
+      type: object
+      properties:
+        name: { type: string }
+        duration_ms: { type: integer, format: int64 }
+        success: { type: boolean }
+        error: { type: string }
+        size_delta_bytes: { type: integer, format: int64 }
+
+    SizeImpact:
+      type: object
+      properties:
+        input_bytes: { type: integer, format: int64 }
+        output_bytes: { type: integer, format: int64 }
+        pass_deltas:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+
+    CompatibilityReport:
+      type: object
+      properties:
+        status: { type: string }
+        mode: { type: string }
+        exit_code: { type: integer }
+        timed_out: { type: boolean }
+        stdout_snippet: { type: string }
+        stderr_snippet: { type: string }
+        notes: { type: string }
+
+    StrengthScore:
+      type: object
+      properties:
+        score: { type: integer, minimum: 0, maximum: 100 }
+        band: { type: string }
+        time_estimate: { type: string }
+
+    RetrySuggestion:
+      type: object
+      properties:
+        label: { type: string }
+        reason: { type: string }
+        tier: { type: string }
+        low_entropy: { type: boolean }
+        polymorphic_mode: { type: boolean }
+        protections:
+          type: array
+          items: { type: string }
+
+    ThreatIntelJobStatus:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        submitted: { type: boolean }
+        job_id: { type: string }
+        sample_hash: { type: string }
+        provider: { type: string }
+        status: { type: string }
+        provider_submission: { type: string }
+        analysis_status: { type: string }
+        detected_count: { type: integer }
+        engine_count: { type: integer }
+        verdict_ratio: { type: number, format: float }
+        submitted_at: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        last_error: { type: string }
+
+    TechniqueFlag:
+      type: object
+      properties:
+        technique_key: { type: string }
+        severity: { type: string }
+        reason: { type: string }
+        opened_at: { type: string, format: date-time }
+        closed_at: { type: string, format: date-time }
+        state: { type: string }
+        last_detected_ratio: { type: number, format: float }
+        last_sample_count: { type: integer }
 
   responses:
     BadRequest:

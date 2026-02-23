@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using dnlib.DotNet;
@@ -10,6 +11,7 @@ namespace ShieldBinary.Engine;
 
 public static class Program
 {
+    private const string TelemetryPrefix = "[engine-telemetry]";
     public static int Main(string[] args)
     {
         if (args.Length < 3)
@@ -189,14 +191,40 @@ public static class Program
 
         foreach (var pass in passes)
         {
+            var beforeSize = EstimateModuleILSize(module);
+            var sw = Stopwatch.StartNew();
             try
             {
                 if (verbose) Console.Error.WriteLine($"[engine] Running pass: {pass.Name}");
                 pass.Run(ctx, module);
+                sw.Stop();
+                var afterSize = EstimateModuleILSize(module);
+                EmitTelemetry(new
+                {
+                    type = "pass_metric",
+                    pass = pass.Name,
+                    duration_ms = sw.ElapsedMilliseconds,
+                    success = true,
+                    size_before = beforeSize,
+                    size_after = afterSize,
+                    size_delta = afterSize - beforeSize,
+                });
                 if (verbose) Console.Error.WriteLine($"[engine] Done: {pass.Name}");
             }
             catch (Exception ex)
             {
+                sw.Stop();
+                EmitTelemetry(new
+                {
+                    type = "pass_metric",
+                    pass = pass.Name,
+                    duration_ms = sw.ElapsedMilliseconds,
+                    success = false,
+                    error = ex.Message,
+                    size_before = beforeSize,
+                    size_after = EstimateModuleILSize(module),
+                    size_delta = EstimateModuleILSize(module) - beforeSize,
+                });
                 throw new InvalidOperationException($"{pass.Name}: {ex.Message}", ex);
             }
         }
@@ -217,6 +245,42 @@ public static class Program
         var writerOptions = new ModuleWriterOptions(module);
         writerOptions.MetadataOptions.Flags |= MetadataFlags.KeepOldMaxStack;
         module.Write(ctx.OutputPath, writerOptions);
+        var outSize = new FileInfo(ctx.OutputPath).Length;
+        EmitTelemetry(new
+        {
+            type = "pipeline_summary",
+            output_path = ctx.OutputPath,
+            output_size = outSize,
+            pass_count = passes.Length,
+            tier = ctx.Tier,
+        });
+    }
+
+    private static long EstimateModuleILSize(ModuleDef module)
+    {
+        long total = 0;
+        foreach (var type in module.GetAllTypes())
+        {
+            foreach (var method in type.Methods)
+            {
+                if (!method.HasBody || method.Body?.Instructions == null) continue;
+                total += method.Body.Instructions.Count;
+            }
+        }
+        return total;
+    }
+
+    private static void EmitTelemetry(object payload)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(payload);
+            Console.Error.WriteLine($"{TelemetryPrefix}{json}");
+        }
+        catch
+        {
+            // swallow telemetry errors to avoid affecting protection flow
+        }
     }
 
     private static IProtectionPass[] GetPassesForTier(string tier) => tier switch

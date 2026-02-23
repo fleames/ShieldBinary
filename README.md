@@ -269,6 +269,49 @@ High-entropy binaries can trigger AV heuristics. Set `engine_low_entropy: true` 
 
 Polymorphic mode (`SHIELD_ENGINE_POLYMORPHIC=1`) is the opposite tuning: it increases build-to-build variation by using higher-variance IL mutation/dead-code/predicate templates. It is automatically suppressed when low entropy mode is enabled.
 
+### Observability and smart retry
+
+Job responses now include optional reporting fields:
+- `pass_metrics`: per-pass duration/success/error with rough size delta
+- `size_impact`: input/output bytes and per-pass deltas
+- `compatibility_report`: container launch check report (`compatible`/`warning`/`incompatible`)
+- `strength_score`: heuristic score (`0-100`), qualitative band, and analyst-time estimate
+- `retry_suggestions`: ranked fallback configurations for failed or incompatible jobs
+
+Worker compatibility check flags:
+- `SHIELD_ENABLE_COMPAT_CHECK=1|0`
+- `SHIELD_COMPAT_CHECK_MODE=container`
+- `SHIELD_COMPAT_CHECK_TIMEOUT_SEC=12`
+- `SHIELD_COMPAT_OUTPUT_MAX_BYTES=1200`
+
+Notes:
+- Compatibility checks are best-effort and do not block successful output upload.
+- Strength score is a heuristic estimate and should be treated as directional guidance, not proof.
+
+### Threat intelligence feedback loop (manual opt-in)
+
+ShieldBinary now supports a manual opt-in threat intelligence flow (VirusTotal first integration):
+- Submit a completed protected output using `POST /api/v1/jobs/:id/threat-intel/submit`
+- Check submission/result status via `GET /api/v1/jobs/:id/threat-intel`
+- Review technique-level flags via `GET /api/v1/threat-intel/flags`
+
+When enabled, the worker polls pending provider analyses and computes rolling technique detection signals. Techniques can be flagged for review when detection reliability rises beyond configured heuristics.
+
+Configuration:
+- `SHIELD_ENABLE_THREAT_INTEL=1`
+- `SHIELD_THREAT_INTEL_PROVIDER=virustotal`
+- `SHIELD_VT_API_KEY=<key>`
+- `SHIELD_THREAT_INTEL_POLL_INTERVAL_SEC=30`
+- `SHIELD_THREAT_INTEL_LOOKUP_TIMEOUT_SEC=20`
+- `SHIELD_THREAT_INTEL_MAX_SAMPLE_BYTES=31457280`
+- `SHIELD_VT_BASE_URL=https://www.virustotal.com/api/v3`
+- `SHIELD_VT_MAX_RETRIES=2`
+
+Safety defaults:
+- Off by default (`enable_threat_intel=false`)
+- Manual opt-in only (no automatic uploads)
+- Max sample size guard enforced before submission
+
 ### Pro tier stability
 
 If **Pro** crashes on your app (e.g. reflection-heavy, game tools):

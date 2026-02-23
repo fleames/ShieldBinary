@@ -1,9 +1,17 @@
 # ShieldBinary — Launch full stack locally (Windows)
 # Starts: Redis (Docker, optional) | API | Worker | Frontend
-# Usage: .\scripts\run.ps1     — run everything
-#        .\scripts\run.ps1 -NoRedis  — skip Redis check (use existing instance)
+# Usage: .\scripts\run.ps1                              — run everything
+#        .\scripts\run.ps1 -NoRedis                     — skip Redis check (use existing instance)
+#        .\scripts\run.ps1 -EnableThreatIntel           — enable manual opt-in threat intel flow
+#        .\scripts\run.ps1 -EnableThreatIntel -VTApiKey "<key>"   — enable VT integration for API/worker
+#        .\scripts\run.ps1 -EnableThreatIntel -ThreatIntelMaxSampleMB 100   — allow larger TI submissions
 
-param([switch]$NoRedis)
+param(
+    [switch]$NoRedis,
+    [switch]$EnableThreatIntel,
+    [string]$VTApiKey = "",
+    [int]$ThreatIntelMaxSampleMB = 30
+)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -67,14 +75,38 @@ if (Test-Path "bin/scanner.exe") { Write-Host "[Scanner] Built (bin/scanner.exe)
 
 Write-Host ''
 
+# --- Threat intel env wiring ---
+$threatIntelPrefix = ""
+if ($EnableThreatIntel) {
+    $threatIntelPrefix = "`$env:SHIELD_ENABLE_THREAT_INTEL='1'; `$env:SHIELD_THREAT_INTEL_PROVIDER='virustotal'; "
+    if ($ThreatIntelMaxSampleMB -gt 0) {
+        $maxBytes = $ThreatIntelMaxSampleMB * 1024 * 1024
+        $threatIntelPrefix += "`$env:SHIELD_THREAT_INTEL_MAX_SAMPLE_BYTES='$maxBytes'; "
+        Write-Host "[Threat Intel] Max sample size: ${ThreatIntelMaxSampleMB}MB" -ForegroundColor Gray
+    }
+    if ($VTApiKey -ne "") {
+        $escaped = $VTApiKey.Replace("'", "''")
+        $threatIntelPrefix += "`$env:SHIELD_VT_API_KEY='$escaped'; "
+    } else {
+        Write-Host '[Threat Intel] Enabled without VT API key (submit calls will fail until key is provided)' -ForegroundColor Yellow
+    }
+    Write-Host '[Threat Intel] Enabled (manual opt-in mode)' -ForegroundColor Green
+} else {
+    Write-Host '[Threat Intel] Disabled' -ForegroundColor Gray
+}
+
+# --- Start services ---
+Write-Host ''
 # --- Start services ---
 Write-Host '[API] Starting on http://localhost:8080...' -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$root'; go run ./cmd/api" -WindowStyle Normal
+$apiCommand = $threatIntelPrefix + "cd '$root'; go run ./cmd/api"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $apiCommand -WindowStyle Normal
 
 Start-Sleep -Seconds 2
 
 Write-Host '[Worker] Starting...' -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$root'; go run ./cmd/worker" -WindowStyle Normal
+$workerCommand = $threatIntelPrefix + "cd '$root'; go run ./cmd/worker"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $workerCommand -WindowStyle Normal
 
 Start-Sleep -Seconds 1
 
