@@ -280,12 +280,18 @@ Job responses now include optional reporting fields:
 
 Worker compatibility check flags:
 - `SHIELD_ENABLE_COMPAT_CHECK=1|0`
-- `SHIELD_COMPAT_CHECK_MODE=container`
+- `SHIELD_COMPAT_CHECK_MODE=container|windows_vm`
 - `SHIELD_COMPAT_CHECK_TIMEOUT_SEC=12`
 - `SHIELD_COMPAT_OUTPUT_MAX_BYTES=1200`
+- `SHIELD_VM_RUNNER_URL=https://your-runner.example`
+- `SHIELD_VM_RUNNER_AUTH_TOKEN=<token>`
+- `SHIELD_VM_RUNNER_TIMEOUT_SEC=45`
+- `SHIELD_VM_RUNNER_MAX_PAYLOAD_BYTES=125829120`
 
 Notes:
 - Compatibility checks are best-effort and do not block successful output upload.
+- `windows_vm` mode sends both native and .NET outputs to a remote Windows VM runner (`POST /compat-check` JSON contract) for isolated launch checks.
+- Full deployment walkthrough: `docs/windows-vm-runner-setup.md`
 - Strength score is a heuristic estimate and should be treated as directional guidance, not proof.
 
 ### Threat intelligence feedback loop (manual opt-in)

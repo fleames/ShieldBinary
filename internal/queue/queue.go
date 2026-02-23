@@ -297,33 +297,45 @@ func parsePassMetricsJSON(s string) []PassMetric {
 }
 
 func parseSizeImpactJSON(s string) *SizeImpact {
-	if strings.TrimSpace(s) == "" {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
 		return nil
 	}
 	var out SizeImpact
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
+	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+		return nil
+	}
+	if out.InputBytes == 0 && out.OutputBytes == 0 && len(out.PassDeltas) == 0 {
 		return nil
 	}
 	return &out
 }
 
 func parseCompatibilityReportJSON(s string) *CompatibilityReport {
-	if strings.TrimSpace(s) == "" {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
 		return nil
 	}
 	var out CompatibilityReport
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
+	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+		return nil
+	}
+	if strings.TrimSpace(out.Status) == "" && strings.TrimSpace(out.Mode) == "" && strings.TrimSpace(out.Notes) == "" && out.ExitCode == 0 && !out.TimedOut && out.StdoutSnippet == "" && out.StderrSnippet == "" {
 		return nil
 	}
 	return &out
 }
 
 func parseStrengthScoreJSON(s string) *StrengthScore {
-	if strings.TrimSpace(s) == "" {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
 		return nil
 	}
 	var out StrengthScore
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
+	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+		return nil
+	}
+	if out.Score == 0 && strings.TrimSpace(out.Band) == "" && strings.TrimSpace(out.TimeEstimate) == "" {
 		return nil
 	}
 	return &out

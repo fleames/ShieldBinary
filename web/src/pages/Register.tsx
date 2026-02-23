@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { Alert, Button, Card, Input } from '../design-system';
 
 export default function Register() {
   const [email, setEmail] = useState('');
@@ -38,123 +39,65 @@ export default function Register() {
   };
 
   return (
-    <div style={{ maxWidth: 400, margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Create account</h1>
-      <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>
-        Sign up to start protecting your binaries.
-      </p>
+    <div className="sb-auth-wrap">
+      <h1 className="page-title">Create operator account</h1>
+      <p className="page-subtitle">Initialize your secure workspace and start protecting binaries.</p>
 
       {error && (
-        <div
-          role="alert"
-          style={{
-            padding: '0.75rem 1rem',
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid var(--error)',
-            borderRadius: 8,
-            marginBottom: '1.5rem',
-            color: 'var(--error)',
-          }}
-        >
-          {error}
-        </div>
+        <Alert tone="danger" style={{ marginBottom: '1.25rem' }}>{error}</Alert>
       )}
 
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '1rem' }}>
+      <Card>
+        <form onSubmit={handleSubmit} className="sb-stack">
           <label
             htmlFor="email"
-            style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.35rem', color: 'var(--text-muted)' }}
+            style={{ display: 'grid', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}
           >
             Email
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoComplete="email"
+            />
           </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-            style={{
-              width: '100%',
-              padding: '0.75rem 1rem',
-              background: 'var(--bg-muted)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text)',
-              fontSize: '1rem',
-            }}
-          />
-        </div>
-        <div style={{ marginBottom: '1rem' }}>
           <label
             htmlFor="password"
-            style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.35rem', color: 'var(--text-muted)' }}
+            style={{ display: 'grid', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}
           >
             Password
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={8}
+              autoComplete="new-password"
+            />
           </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
-            autoComplete="new-password"
-            style={{
-              width: '100%',
-              padding: '0.75rem 1rem',
-              background: 'var(--bg-muted)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text)',
-              fontSize: '1rem',
-            }}
-          />
-        </div>
-        <div style={{ marginBottom: '1.5rem' }}>
           <label
             htmlFor="confirmPassword"
-            style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.35rem', color: 'var(--text-muted)' }}
+            style={{ display: 'grid', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}
           >
             Confirm password
+            <Input
+              id="confirmPassword"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={8}
+              autoComplete="new-password"
+            />
           </label>
-          <input
-            id="confirmPassword"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            required
-            minLength={8}
-            autoComplete="new-password"
-            style={{
-              width: '100%',
-              padding: '0.75rem 1rem',
-              background: 'var(--bg-muted)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text)',
-              fontSize: '1rem',
-            }}
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={submitting}
-          style={{
-            width: '100%',
-            padding: '0.75rem 1.5rem',
-            background: submitting ? 'var(--bg-muted)' : 'var(--accent)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontWeight: 600,
-            cursor: submitting ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {submitting ? 'Creating account...' : 'Create account'}
-        </button>
-      </form>
+          <Button type="submit" disabled={submitting} size="lg">
+            {submitting ? 'Creating account...' : 'Create account'}
+          </Button>
+        </form>
+      </Card>
 
       <p style={{ marginTop: '1.5rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
         Already have an account?{' '}

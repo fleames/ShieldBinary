@@ -1,3 +1,5 @@
+import { Badge, Card, Panel } from '../design-system';
+
 type Tier = {
   id: string;
   name: string;
@@ -77,25 +79,17 @@ const CROSS_CUTTING = [
 export default function Tiers() {
   return (
     <div style={{ maxWidth: 980, margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.6rem', marginBottom: '0.5rem' }}>Tiers, Features, and Techniques</h1>
-      <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+      <h1 className="page-title">Tiers, Features, and Techniques</h1>
+      <p className="page-subtitle">
         Complete overview of what each ShieldBinary tier includes. Items marked opt-in require explicit engine flags.
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.9rem' }}>
         {TIERS.map((tier) => (
-          <section
-            key={tier.id}
-            style={{
-              border: '1px solid var(--border)',
-              borderRadius: 10,
-              background: 'var(--bg-elevated)',
-              padding: '1rem',
-            }}
-          >
+          <Card key={tier.id}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.35rem' }}>
               <h2 style={{ margin: 0, fontSize: '1rem' }}>{tier.name}</h2>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)', fontSize: '0.85rem' }}>{tier.price}</span>
+              <Badge tone="accent">{tier.price}</Badge>
             </div>
             <p style={{ margin: '0 0 0.75rem 0', color: 'var(--text-muted)', fontSize: '0.875rem' }}>{tier.summary}</p>
             <ul style={{ margin: 0, paddingLeft: '1.1rem', display: 'grid', gap: '0.35rem' }}>
@@ -103,26 +97,18 @@ export default function Tiers() {
                 <li key={t} style={{ fontSize: '0.86rem' }}>{t}</li>
               ))}
             </ul>
-          </section>
+          </Card>
         ))}
       </div>
 
-      <section
-        style={{
-          marginTop: '1rem',
-          border: '1px solid var(--border)',
-          borderRadius: 10,
-          background: 'var(--bg-elevated)',
-          padding: '1rem',
-        }}
-      >
+      <Panel style={{ marginTop: '1rem' }}>
         <h2 style={{ marginTop: 0, fontSize: '1rem' }}>Cross-Cutting Features</h2>
         <ul style={{ margin: 0, paddingLeft: '1.1rem', display: 'grid', gap: '0.35rem' }}>
           {CROSS_CUTTING.map((f) => (
             <li key={f} style={{ fontSize: '0.86rem' }}>{f}</li>
           ))}
         </ul>
-      </section>
+      </Panel>
     </div>
   );
 }

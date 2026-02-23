@@ -16,16 +16,23 @@ func (w *Worker) runCompatibilityCheck(ctx context.Context, outputPath, binaryTy
 	if !w.cfg.EnableCompatCheck {
 		return &queue.CompatibilityReport{Status: "unknown", Mode: "disabled", Notes: "compatibility check disabled"}
 	}
-	if strings.ToLower(w.cfg.CompatCheckMode) != "container" {
-		return &queue.CompatibilityReport{Status: "unknown", Mode: w.cfg.CompatCheckMode, Notes: "only container mode is enabled in this rollout"}
+	mode := strings.ToLower(strings.TrimSpace(w.cfg.CompatCheckMode))
+	if mode == "windows_vm" {
+		return w.runWindowsVMCompatibilityCheck(ctx, outputPath, binaryType)
 	}
-	if runtime.GOOS == "windows" && binaryType == "native" {
-		return &queue.CompatibilityReport{Status: "warning", Mode: "container", Notes: "native PE container check not supported on this worker"}
-	}
-
 	timeout := time.Duration(w.cfg.CompatCheckTimeoutSec) * time.Second
 	if timeout <= 0 {
 		timeout = 12 * time.Second
+	}
+
+	if mode != "container" {
+		return &queue.CompatibilityReport{Status: "unknown", Mode: mode, Notes: "compatibility check mode not recognized; expected container or windows_vm"}
+	}
+	if strings.ToLower(binaryType) == "native" {
+		if runtime.GOOS == "windows" {
+			return runNativeCompatibilityProbe(ctx, outputPath, timeout)
+		}
+		return &queue.CompatibilityReport{Status: "unknown", Mode: "container", Notes: "native compatibility probe is currently supported on Windows workers only"}
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -86,4 +93,61 @@ func clipSnippet(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+func runNativeCompatibilityProbe(ctx context.Context, outputPath string, timeout time.Duration) *queue.CompatibilityReport {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(checkCtx, outputPath)
+	cmd.Dir = filepath.Dir(outputPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	startErr := cmd.Start()
+	if startErr != nil {
+		return &queue.CompatibilityReport{
+			Status:        "incompatible",
+			Mode:          "local_native_probe",
+			StdoutSnippet: clipSnippet(stdout.String(), 1200),
+			StderrSnippet: clipSnippet(stderr.String(), 1200),
+			Notes:         "native launch failed during probe start",
+		}
+	}
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-waitDone:
+		report := &queue.CompatibilityReport{
+			Mode:          "local_native_probe",
+			StdoutSnippet: clipSnippet(stdout.String(), 1200),
+			StderrSnippet: clipSnippet(stderr.String(), 1200),
+		}
+		if cmd.ProcessState != nil {
+			report.ExitCode = cmd.ProcessState.ExitCode()
+		}
+		if err != nil {
+			report.Status = "incompatible"
+			report.Notes = "native process exited with failure during probe"
+			return report
+		}
+		report.Status = "compatible"
+		report.Notes = "native process launched and exited during probe"
+		return report
+	case <-checkCtx.Done():
+		_ = cmd.Process.Kill()
+		<-waitDone
+		return &queue.CompatibilityReport{
+			Status:        "compatible",
+			Mode:          "local_native_probe",
+			TimedOut:      true,
+			StdoutSnippet: clipSnippet(stdout.String(), 1200),
+			StderrSnippet: clipSnippet(stderr.String(), 1200),
+			Notes:         "native process launched and remained running past probe timeout",
+		}
+	}
 }

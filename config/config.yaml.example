@@ -24,9 +24,13 @@ native_loader_path: ""
 
 # Compatibility launch check
 enable_compat_check: true
-compat_check_mode: container
+compat_check_mode: container # container | windows_vm
 compat_check_timeout_sec: 12
 compat_output_max_bytes: 1200
+vm_runner_url: ""
+vm_runner_timeout_sec: 45
+vm_runner_max_payload_bytes: 125829120
+# vm_runner_auth_token: use SHIELD_VM_RUNNER_AUTH_TOKEN env var
 
 # Threat intelligence (manual opt-in)
 enable_threat_intel: false

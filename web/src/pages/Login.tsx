@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { Alert, Button, Card, Input } from '../design-system';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -29,96 +30,49 @@ export default function Login() {
   };
 
   return (
-    <div style={{ maxWidth: 400, margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Sign in</h1>
-      <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>
-        Sign in to protect your binaries.
-      </p>
+    <div className="sb-auth-wrap">
+      <h1 className="page-title">Welcome back</h1>
+      <p className="page-subtitle">Sign in to enter the protection control nexus.</p>
 
       {error && (
-        <div
-          role="alert"
-          style={{
-            padding: '0.75rem 1rem',
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid var(--error)',
-            borderRadius: 8,
-            marginBottom: '1.5rem',
-            color: 'var(--error)',
-          }}
-        >
-          {error}
-        </div>
+        <Alert tone="danger" style={{ marginBottom: '1.25rem' }}>{error}</Alert>
       )}
 
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '1rem' }}>
+      <Card>
+        <form onSubmit={handleSubmit} className="sb-stack">
           <label
             htmlFor="email"
-            style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.35rem', color: 'var(--text-muted)' }}
+            style={{ display: 'grid', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}
           >
             Email
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoComplete="email"
+            />
           </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-            style={{
-              width: '100%',
-              padding: '0.75rem 1rem',
-              background: 'var(--bg-muted)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text)',
-              fontSize: '1rem',
-            }}
-          />
-        </div>
-        <div style={{ marginBottom: '1.5rem' }}>
           <label
             htmlFor="password"
-            style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.35rem', color: 'var(--text-muted)' }}
+            style={{ display: 'grid', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}
           >
             Password
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoComplete="current-password"
+            />
           </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-            style={{
-              width: '100%',
-              padding: '0.75rem 1rem',
-              background: 'var(--bg-muted)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text)',
-              fontSize: '1rem',
-            }}
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={submitting}
-          style={{
-            width: '100%',
-            padding: '0.75rem 1.5rem',
-            background: submitting ? 'var(--bg-muted)' : 'var(--accent)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontWeight: 600,
-            cursor: submitting ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {submitting ? 'Signing in...' : 'Sign in'}
-        </button>
-      </form>
+          <Button type="submit" disabled={submitting} size="lg">
+            {submitting ? 'Signing in...' : 'Sign in'}
+          </Button>
+        </form>
+      </Card>
 
       <p style={{ marginTop: '1.5rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
         Don't have an account?{' '}

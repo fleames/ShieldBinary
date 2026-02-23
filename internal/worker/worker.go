@@ -214,9 +214,10 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 		if len(obs.PassMetrics) > 0 {
 			_ = w.queue.SetPassMetrics(ctx, job.ID, obs.PassMetrics)
 		}
-		if obs.SizeImpact != nil {
-			_ = w.queue.SetSizeImpact(ctx, job.ID, obs.SizeImpact)
-		}
+	}
+	sizeImpact := estimateSizeImpact(inputPath, outputPath, obs)
+	if sizeImpact != nil {
+		_ = w.queue.SetSizeImpact(ctx, job.ID, sizeImpact)
 	}
 	compat := w.runCompatibilityCheck(ctx, outputPath, detectedType)
 	_ = w.queue.SetCompatibilityReport(ctx, job.ID, compat)
@@ -459,4 +460,27 @@ func debugLog(runID, hypothesisID, location, message string, data map[string]int
 		"message":      message,
 		"data":         data,
 	})
+}
+
+func estimateSizeImpact(inputPath, outputPath string, obs *engineObservability) *queue.SizeImpact {
+	var sizeImpact *queue.SizeImpact
+	if obs != nil && obs.SizeImpact != nil {
+		sizeImpact = obs.SizeImpact
+	} else {
+		sizeImpact = &queue.SizeImpact{}
+	}
+	if sizeImpact.InputBytes == 0 {
+		if st, err := os.Stat(inputPath); err == nil {
+			sizeImpact.InputBytes = st.Size()
+		}
+	}
+	if sizeImpact.OutputBytes == 0 {
+		if st, err := os.Stat(outputPath); err == nil {
+			sizeImpact.OutputBytes = st.Size()
+		}
+	}
+	if sizeImpact.InputBytes == 0 && sizeImpact.OutputBytes == 0 && len(sizeImpact.PassDeltas) == 0 {
+		return nil
+	}
+	return sizeImpact
 }

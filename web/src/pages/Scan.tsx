@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiErrorFromResponse } from '../lib/api';
+import { Alert, Badge, Button, Card, Panel } from '../design-system';
 
 const API = '/api/v1';
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
@@ -83,97 +84,68 @@ export default function Scan() {
   }, [file, authFetch]);
 
   return (
-    <div style={{ maxWidth: 640, margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>
-        Scan executable
-      </h1>
-      <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>
-        Upload a .exe or .dll to detect PE type, architecture, and BinaryProtect protection.
+    <div style={{ maxWidth: 760, margin: '0 auto' }}>
+      <h1 className="page-title">Binary Intelligence Scan</h1>
+      <p className="page-subtitle">
+        Upload a `.exe` or `.dll` to classify architecture, .NET identity, and protection signatures.
       </p>
 
       {error && (
-        <div
-          role="alert"
-          style={{
-            padding: '0.75rem 1rem',
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid var(--error)',
-            borderRadius: 8,
-            marginBottom: '1.5rem',
-            color: 'var(--error)',
-          }}
-        >
-          {error}
-        </div>
+        <Alert tone="danger" style={{ marginBottom: '1.25rem' }}>{error}</Alert>
       )}
 
-      <div
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={handleDrop}
-        style={{
-          border: '2px dashed var(--border)',
-          borderRadius: 8,
-          padding: '2rem',
-          textAlign: 'center',
-          background: 'var(--bg-muted)',
-          cursor: scanning ? 'wait' : 'pointer',
-          marginBottom: '2rem',
-        }}
-      >
-        <input
-          type="file"
-          accept=".exe,.dll"
-          onChange={handleFileSelect}
-          style={{ display: 'none' }}
-          id="scan-file-upload"
-          disabled={scanning}
-        />
-        <label
-          htmlFor="scan-file-upload"
+      <Card>
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
           style={{
+            border: '2px dashed var(--border)',
+            borderRadius: 16,
+            padding: '2rem',
+            textAlign: 'center',
+            background: 'var(--glass)',
             cursor: scanning ? 'wait' : 'pointer',
-            display: 'block',
+            marginBottom: '1.5rem',
           }}
         >
-          {file ? (
-            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>
-              {file.name} ({(file.size / 1024).toFixed(1)} KB)
-            </span>
-          ) : (
-            <span style={{ color: 'var(--text-muted)' }}>
-              Drop your .exe or .dll here, or click to browse
-            </span>
-          )}
-        </label>
-      </div>
+          <input
+            type="file"
+            accept=".exe,.dll"
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+            id="scan-file-upload"
+            disabled={scanning}
+          />
+          <label
+            htmlFor="scan-file-upload"
+            style={{
+              cursor: scanning ? 'wait' : 'pointer',
+              display: 'block',
+            }}
+          >
+            {file ? (
+              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>
+                {file.name} ({(file.size / 1024).toFixed(1)} KB)
+              </span>
+            ) : (
+              <span style={{ color: 'var(--text-muted)' }}>
+                Drop your .exe or .dll here, or click to browse
+              </span>
+            )}
+          </label>
+        </div>
 
-      <button
-        disabled={!file || scanning}
-        onClick={handleScan}
-        style={{
-          padding: '0.75rem 1.5rem',
-          background: file && !scanning ? 'var(--accent)' : 'var(--bg-muted)',
-          color: 'white',
-          border: 'none',
-          borderRadius: 8,
-          fontFamily: 'var(--font-sans)',
-          fontWeight: 600,
-          cursor: file && !scanning ? 'pointer' : 'not-allowed',
-        }}
-      >
-        {scanning ? 'Scanning...' : 'Scan'}
-      </button>
+        <Button
+          disabled={!file || scanning}
+          onClick={handleScan}
+          size="lg"
+        >
+          {scanning ? 'Scanning...' : 'Scan'}
+        </Button>
+      </Card>
 
       {result && (
-        <div
-          style={{
-            marginTop: '2rem',
-            padding: '1.25rem',
-            background: 'var(--bg-muted)',
-            borderRadius: 8,
-            border: '1px solid var(--border)',
-          }}
-        >
+        <Panel style={{ marginTop: '2rem' }}>
           <h2 style={{ fontSize: '1rem', marginBottom: '1rem' }}>Scan result</h2>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.875rem' }}>
             {result.error ? (
@@ -201,9 +173,9 @@ export default function Scan() {
                     </td>
                     <td style={{ padding: '0.35rem 0' }}>
                       {result.valid_pe ? (
-                        <span style={{ color: 'var(--success)' }}>Yes</span>
+                        <Badge tone="success">Yes</Badge>
                       ) : (
-                        <span style={{ color: 'var(--error)' }}>No</span>
+                        <Badge tone="danger">No</Badge>
                       )}
                     </td>
                   </tr>
@@ -215,7 +187,7 @@ export default function Scan() {
                         </td>
                         <td style={{ padding: '0.35rem 0' }}>
                           {result.is_dotnet ? (
-                            <span style={{ color: 'var(--accent)' }}>Yes</span>
+                            <Badge tone="accent">Yes</Badge>
                           ) : (
                             'No'
                           )}
@@ -272,7 +244,7 @@ export default function Scan() {
               </table>
             )}
           </div>
-        </div>
+        </Panel>
       )}
     </div>
   );

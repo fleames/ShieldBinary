@@ -39,10 +39,14 @@ type Config struct {
 	NativeLoaderPath string `mapstructure:"native_loader_path"`
 
 	// Compatibility check (post-protection verification)
-	EnableCompatCheck     bool   `mapstructure:"enable_compat_check"`
-	CompatCheckMode       string `mapstructure:"compat_check_mode"` // container
-	CompatCheckTimeoutSec int    `mapstructure:"compat_check_timeout_sec"`
-	CompatOutputMaxBytes  int    `mapstructure:"compat_output_max_bytes"`
+	EnableCompatCheck       bool   `mapstructure:"enable_compat_check"`
+	CompatCheckMode         string `mapstructure:"compat_check_mode"` // container|windows_vm
+	CompatCheckTimeoutSec   int    `mapstructure:"compat_check_timeout_sec"`
+	CompatOutputMaxBytes    int    `mapstructure:"compat_output_max_bytes"`
+	VMRunnerURL             string `mapstructure:"vm_runner_url"`
+	VMRunnerAuthToken       string `mapstructure:"vm_runner_auth_token"`
+	VMRunnerTimeoutSec      int    `mapstructure:"vm_runner_timeout_sec"`
+	VMRunnerMaxPayloadBytes int64  `mapstructure:"vm_runner_max_payload_bytes"`
 
 	// Threat intelligence (manual opt-in; VirusTotal first)
 	EnableThreatIntel           bool   `mapstructure:"enable_threat_intel"`
@@ -100,6 +104,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("compat_check_mode", "container")
 	viper.SetDefault("compat_check_timeout_sec", 12)
 	viper.SetDefault("compat_output_max_bytes", 1200)
+	viper.SetDefault("vm_runner_timeout_sec", 45)
+	viper.SetDefault("vm_runner_max_payload_bytes", 120*1024*1024)
 	viper.SetDefault("enable_threat_intel", false)
 	viper.SetDefault("threat_intel_provider", "virustotal")
 	viper.SetDefault("threat_intel_poll_interval_sec", 30)
@@ -144,6 +150,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("SHIELD_CORS_ORIGINS"); v != "" {
 		cfg.CORSOrigins = v
+	}
+	if v := os.Getenv("SHIELD_VM_RUNNER_AUTH_TOKEN"); v != "" {
+		cfg.VMRunnerAuthToken = v
 	}
 	if v := os.Getenv("SHIELD_VT_API_KEY"); v != "" {
 		cfg.VTAPIKey = v
