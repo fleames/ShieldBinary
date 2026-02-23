@@ -1,232 +1,265 @@
-# Windows VM Runner Setup Guide
+# Windows VM Runner Setup (Host Controller + Snapshot Reset)
 
-This guide explains how to deploy and run the Windows VM compatibility runner used by `SHIELD_COMPAT_CHECK_MODE=windows_vm`.
+This guide deploys the VM runner as a **host-side controller** on a Hyper-V host, not inside the guest VM.
 
-The runner is a separate HTTP service that receives a protected output, executes a launch probe inside a Windows VM context, and returns compatibility telemetry.
+Why this model:
+- The controller can force snapshot restore before every execution.
+- Untrusted binaries execute in a disposable guest VM.
+- The API contract remains compatible with ShieldBinary `windows_vm` mode (`POST /compat-check`).
+
+---
 
 ## Quick 5-minute setup
 
-If you want the fastest bring-up path, do this first:
-
-1. On the Windows VM, install prerequisites:
+1. On the **Hyper-V host** (Administrator PowerShell), install runtime:
    ```powershell
    winget install Python.Python.3.12
-   winget install Microsoft.DotNet.Runtime.8
-   py -m pip install fastapi uvicorn
+   py -m pip install -r C:\path\to\BinaryProtect\tools\vm-host-controller\requirements.txt
    ```
-2. Create `C:\vm-runner\app.py` using the script in this guide.
-3. Set token and run runner:
+2. Create a clean VM snapshot (once):
+   ```powershell
+   Checkpoint-VM -Name "ShieldRunnerVM" -SnapshotName "clean-base"
+   ```
+3. Set required environment variables:
    ```powershell
    setx VM_RUNNER_TOKEN "REPLACE_WITH_LONG_RANDOM_TOKEN"
-   # open new shell
-   cd C:\vm-runner
+   setx HYPERV_VM_NAME "ShieldRunnerVM"
+   setx HYPERV_SNAPSHOT_NAME "clean-base"
+   setx VM_GUEST_USERNAME "Administrator"
+   setx VM_GUEST_PASSWORD "REPLACE_WITH_GUEST_PASSWORD"
+   ```
+4. Start controller:
+   ```powershell
+   cd C:\path\to\BinaryProtect\tools\vm-host-controller
    uvicorn app:app --host 0.0.0.0 --port 9090
    ```
-4. On ShieldBinary worker host, configure:
+5. Point ShieldBinary worker to host controller:
    ```yaml
    enable_compat_check: true
    compat_check_mode: windows_vm
-   vm_runner_url: "http://<VM_IP>:9090"
+   vm_runner_url: "http://<HYPERV_HOST_IP>:9090"
    ```
-   and set:
+   And set on worker host:
    ```powershell
    $env:SHIELD_VM_RUNNER_AUTH_TOKEN="REPLACE_WITH_LONG_RANDOM_TOKEN"
    ```
-5. Restart API/worker and run a new job.
 
-Then follow the full steps below to install the runner as an auto-start Windows service (NSSM) and harden access.
+---
 
-## 1) Prerequisites on a new Windows VM
+## 1) Topology
 
-Open PowerShell as Administrator and install:
+- **Hyper-V Host**: runs `tools/vm-host-controller/app.py` and has Hyper-V cmdlets access.
+- **Guest VM** (`ShieldRunnerVM`): executes sample binaries only.
+- **ShieldBinary Worker**: sends `/compat-check` requests to host controller.
+
+Execution flow per request:
+1. Acquire single-job lock.
+2. Stop VM -> restore snapshot -> start VM.
+3. Wait for PowerShell Direct readiness.
+4. Copy sample into guest, execute with timeout, collect outputs.
+5. Return compatibility JSON.
+6. Stop VM -> restore snapshot again (default enabled).
+
+---
+
+## 2) Host prerequisites (Hyper-V host)
+
+Run as Administrator:
 
 ```powershell
 winget install Python.Python.3.12
-winget install Microsoft.DotNet.Runtime.8
 winget install NSSM.NSSM
 ```
 
-Install Python packages:
+Verify Hyper-V cmdlets exist:
 
 ```powershell
+Get-Command Stop-VM, Start-VM, Restore-VMSnapshot, Copy-VMFile
+```
+
+Install Python deps:
+
+```powershell
+cd C:\path\to\BinaryProtect\tools\vm-host-controller
 py -m pip install --upgrade pip
-py -m pip install fastapi uvicorn
+py -m pip install -r requirements.txt
 ```
 
-## 2) Create runner directory
+---
 
-```powershell
-mkdir C:\vm-runner
-mkdir C:\vm-runner\logs
-```
+## 3) Prepare guest VM baseline
 
-Create `C:\vm-runner\app.py` with:
+Create a dedicated disposable Windows guest VM (example: `ShieldRunnerVM`), then:
 
-```python
-import os
-import base64
-import tempfile
-import subprocess
-from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel
+1. Boot guest once and install only required runtimes (for your workloads), typically:
+   - .NET runtime for `.dll` checks.
+   - VC++ runtime if your native app needs it.
+2. Enable Hyper-V guest service in host (needed for `Copy-VMFile`):
+   ```powershell
+   Enable-VMIntegrationService -VMName "ShieldRunnerVM" -Name "Guest Service Interface"
+   ```
+3. Shut down guest cleanly and create clean snapshot:
+   ```powershell
+   Stop-VM -Name "ShieldRunnerVM" -TurnOff -Force
+   Checkpoint-VM -Name "ShieldRunnerVM" -SnapshotName "clean-base"
+   ```
 
-app = FastAPI()
-TOKEN = os.getenv("VM_RUNNER_TOKEN", "")
-MAX_B64_BYTES = int(os.getenv("VM_RUNNER_MAX_B64_BYTES", str(170 * 1024 * 1024)))
+---
 
-class CompatCheckRequest(BaseModel):
-    binary_type: str
-    file_name: str
-    file_base64: str
-    timeout_seconds: int = 45
+## 4) Controller service code location
 
-def auth_ok(auth_header: str | None) -> bool:
-    if not TOKEN:
-        return False
-    if not auth_header or not auth_header.startswith("Bearer "):
-        return False
-    return auth_header.split(" ", 1)[1] == TOKEN
+Use the repository-provided controller:
 
-@app.post("/compat-check")
-def compat_check(req: CompatCheckRequest, authorization: str | None = Header(default=None)):
-    if not auth_ok(authorization):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    if not req.file_base64 or len(req.file_base64.encode("utf-8")) > MAX_B64_BYTES:
-        raise HTTPException(status_code=400, detail="payload too large or empty")
+- `tools/vm-host-controller/app.py`
+- `tools/vm-host-controller/requirements.txt`
 
-    timeout = max(5, min(req.timeout_seconds, 300))
-    file_name = os.path.basename(req.file_name) or "sample.bin"
-    ext = os.path.splitext(file_name)[1].lower()
+Endpoints:
+- `GET /health`
+- `POST /compat-check`
 
-    with tempfile.TemporaryDirectory(prefix="vmrunner_") as td:
-        out_path = os.path.join(td, file_name)
-        try:
-            raw = base64.b64decode(req.file_base64)
-        except Exception:
-            raise HTTPException(status_code=400, detail="invalid base64 payload")
+Notes:
+- Uses a process lock (single concurrent job).
+- Returns `429 runner busy` if another run is active.
+- Restores snapshot before each execution.
 
-        with open(out_path, "wb") as f:
-            f.write(raw)
+---
 
-        cmd = ["dotnet", out_path] if ext == ".dll" else [out_path]
+## 5) Configure host controller environment
 
-        try:
-            p = subprocess.run(cmd, cwd=td, capture_output=True, text=True, timeout=timeout, shell=False)
-            status = "compatible" if p.returncode == 0 else "incompatible"
-            return {
-                "status": status,
-                "exit_code": p.returncode,
-                "timed_out": False,
-                "stdout_snippet": (p.stdout or "")[:1200],
-                "stderr_snippet": (p.stderr or "")[:1200],
-                "notes": "process completed in VM",
-                "runner_id": os.getenv("COMPUTERNAME", "windows-vm"),
-            }
-        except subprocess.TimeoutExpired as te:
-            return {
-                "status": "compatible",
-                "exit_code": 0,
-                "timed_out": True,
-                "stdout_snippet": (te.stdout or "")[:1200] if te.stdout else "",
-                "stderr_snippet": (te.stderr or "")[:1200] if te.stderr else "",
-                "notes": "process launched and exceeded timeout window",
-                "runner_id": os.getenv("COMPUTERNAME", "windows-vm"),
-            }
-        except Exception as e:
-            return {
-                "status": "warning",
-                "exit_code": 1,
-                "timed_out": False,
-                "stdout_snippet": "",
-                "stderr_snippet": "",
-                "notes": f"runner execution error: {e}",
-                "runner_id": os.getenv("COMPUTERNAME", "windows-vm"),
-            }
-```
-
-## 3) Configure token
-
-Set a strong shared token:
+Set these on the Hyper-V host:
 
 ```powershell
 setx VM_RUNNER_TOKEN "REPLACE_WITH_LONG_RANDOM_TOKEN"
+setx HYPERV_VM_NAME "ShieldRunnerVM"
+setx HYPERV_SNAPSHOT_NAME "clean-base"
+setx VM_GUEST_USERNAME "Administrator"
+setx VM_GUEST_PASSWORD "REPLACE_WITH_GUEST_PASSWORD"
 ```
 
-Open a new PowerShell window after `setx`.
-
-## 4) Test runner manually
+Optional tuning:
 
 ```powershell
-cd C:\vm-runner
+setx VM_RUNNER_ID "hyperv-host-1"
+setx VM_RUNNER_MAX_B64_BYTES "178257920"
+setx HYPERV_BOOT_TIMEOUT_SEC "120"
+setx VM_EXEC_TIMEOUT_CAP_SEC "300"
+setx HYPERV_RESET_AFTER_RUN "1"
+setx VM_GUEST_DROP_DIR "C:\vm-runner"
+```
+
+Open a new shell after `setx`.
+
+---
+
+## 6) Run manually (first validation)
+
+```powershell
+cd C:\path\to\BinaryProtect\tools\vm-host-controller
 uvicorn app:app --host 0.0.0.0 --port 9090
 ```
 
-Stop with `Ctrl+C` after confirming it starts.
+In another shell:
 
-## 5) Install as Windows service (NSSM)
+```powershell
+Invoke-WebRequest "http://127.0.0.1:9090/health"
+```
 
-Update Python path if needed:
+Expect `configured: true` when env is correct.
+
+---
+
+## 7) Install as Windows service (NSSM)
 
 ```powershell
 $nssm = "C:\Program Files\nssm\nssm.exe"
 $py = "C:\Users\Administrator\AppData\Local\Programs\Python\Python312\python.exe"
-$workDir = "C:\vm-runner"
+$workDir = "C:\path\to\BinaryProtect\tools\vm-host-controller"
 
-& $nssm install VMRunner $py "-m uvicorn app:app --host 0.0.0.0 --port 9090"
-& $nssm set VMRunner AppDirectory $workDir
-& $nssm set VMRunner DisplayName "ShieldBinary VM Runner"
-& $nssm set VMRunner Description "Windows VM compatibility runner for ShieldBinary"
-& $nssm set VMRunner Start SERVICE_AUTO_START
-& $nssm set VMRunner AppStdout "C:\vm-runner\logs\runner.out.log"
-& $nssm set VMRunner AppStderr "C:\vm-runner\logs\runner.err.log"
-& $nssm set VMRunner AppRotateFiles 1
-& $nssm set VMRunner AppRotateOnline 1
-& $nssm set VMRunner AppRotateSeconds 86400
-& $nssm set VMRunner AppRotateBytes 10485760
-Start-Service VMRunner
-Get-Service VMRunner
+& $nssm install VMHostController $py "-m uvicorn app:app --host 0.0.0.0 --port 9090"
+& $nssm set VMHostController AppDirectory $workDir
+& $nssm set VMHostController DisplayName "ShieldBinary VM Host Controller"
+& $nssm set VMHostController Description "Hyper-V snapshot-based compatibility runner controller"
+& $nssm set VMHostController Start SERVICE_AUTO_START
+& $nssm set VMHostController AppStdout "C:\vm-runner\logs\host-controller.out.log"
+& $nssm set VMHostController AppStderr "C:\vm-runner\logs\host-controller.err.log"
+& $nssm set VMHostController AppRotateFiles 1
+& $nssm set VMHostController AppRotateOnline 1
+& $nssm set VMHostController AppRotateSeconds 86400
+& $nssm set VMHostController AppRotateBytes 10485760
+Start-Service VMHostController
+Get-Service VMHostController
 ```
 
-## 6) Open firewall (or scope to worker IP)
+Create log dir first if missing:
 
 ```powershell
-New-NetFirewallRule -DisplayName "VM Runner 9090" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9090
+mkdir C:\vm-runner\logs -Force
 ```
 
-## 7) Configure ShieldBinary worker/API
+---
+
+## 8) Firewall and access control
+
+Allow controller port only from worker host IP(s):
+
+```powershell
+New-NetFirewallRule -DisplayName "VM Host Controller 9090" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9090 -RemoteAddress <WORKER_HOST_IP>
+```
+
+Do not expose this endpoint publicly without strict network controls.
+
+---
+
+## 9) Configure ShieldBinary worker
 
 In `config/config.yaml`:
 
 ```yaml
 enable_compat_check: true
 compat_check_mode: windows_vm
-vm_runner_url: "http://<VM_IP>:9090"
+vm_runner_url: "http://<HYPERV_HOST_IP>:9090"
 vm_runner_timeout_sec: 45
 vm_runner_max_payload_bytes: 125829120
 ```
 
-Set auth token in worker/API environment:
+Worker/API env:
 
 ```powershell
 $env:SHIELD_VM_RUNNER_AUTH_TOKEN="REPLACE_WITH_LONG_RANDOM_TOKEN"
 ```
 
-Restart API and worker after changes.
+Restart API and worker.
 
-## 8) Validate from worker host
+---
 
-This should return 401 if runner is reachable but auth is wrong:
+## 10) Validate end-to-end
 
-```powershell
-Invoke-WebRequest "http://<VM_IP>:9090/compat-check" -Method POST -ContentType "application/json" -Headers @{Authorization="Bearer WRONG"} -Body "{}"
-```
+1. Check unauthenticated failure:
+   ```powershell
+   Invoke-WebRequest "http://<HYPERV_HOST_IP>:9090/compat-check" -Method POST -ContentType "application/json" -Headers @{Authorization="Bearer WRONG"} -Body "{}"
+   ```
+   Expect `401`.
+2. Submit a ShieldBinary job.
+3. In dashboard job details, confirm compatibility mode reports `windows_vm`.
+4. Confirm host logs show stop/restore/start around each request.
 
-Then run a new protection job and confirm dashboard compatibility report shows mode `windows_vm`.
+---
 
-## 9) Recommended hardening
+## 11) Troubleshooting
 
-- Restrict inbound firewall to worker host IP only.
-- Keep VM disposable/snapshotted (untrusted binary execution).
-- Avoid public exposure without TLS and allowlist.
-- Run service as a low-privilege account where possible.
+- `runner busy` (429): expected if concurrent requests arrive; add VM pool for throughput.
+- `configured: false` on `/health`: missing one or more required env vars.
+- `Copy-VMFile` failures: ensure Guest Service Interface is enabled.
+- readiness timeout: guest credentials wrong, VM booting slowly, or PowerShell Direct unavailable.
+- frequent `warning`: inspect `host-controller.err.log` and verify snapshot name + VM name.
+
+---
+
+## 12) Hardening recommendations
+
+- Keep guest VM disposable and dedicated to sample execution only.
+- Never browse or use email inside this guest.
+- Recreate snapshot after patch cycles (do not auto-update inside baseline snapshot).
+- Restrict local admin rights for controller service account where practical.
+- Consider one-controller-per-VM and a scheduler if you need horizontal scale.
 
