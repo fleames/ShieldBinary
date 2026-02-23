@@ -306,7 +306,32 @@ Config:
 - `SHIELD_VM_SCAN_TIMEOUT_SEC=90`
 - `SHIELD_VM_SCAN_MAX_PAYLOAD_BYTES=125829120`
 
-When enabled, scan response includes an `av_report` block (provider/verdict/threat names/notes).
+Host-side service quick start:
+
+```powershell
+cd tools/vm-av-controller
+py -m pip install -r requirements.txt
+setx VM_SCAN_TOKEN "REPLACE_WITH_LONG_RANDOM_TOKEN"
+setx HYPERV_VM_NAME "ShieldRunnerVM"
+setx HYPERV_SNAPSHOT_NAME "clean-base"
+setx VM_GUEST_USERNAME "Administrator"
+setx VM_GUEST_PASSWORD "REPLACE_WITH_GUEST_PASSWORD"
+# open a new shell after setx, then:
+uvicorn app:app --host 0.0.0.0 --port 9091
+```
+
+Behavior:
+- API submits sample to `POST /av-scan` on the VM controller.
+- Controller restores a clean snapshot before execution.
+- Defender runs in guest VM (`MpCmdRun.exe` custom file scan).
+- Controller returns verdict and resets snapshot again.
+- Scanner service enforces single-job execution (`429 runner busy` on overlap).
+
+When enabled, scan response includes `av_report` fields such as:
+- `provider` (currently `windows_defender`)
+- `verdict` (`clean`, `infected`, `warning`, `unknown`)
+- `threat_names` / `threat_count`
+- `runner_id`, `timed_out`, and `notes`
 
 Setup guide: `docs/windows-vm-av-scanner-setup.md`
 
