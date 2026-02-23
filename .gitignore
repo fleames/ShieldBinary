@@ -1,0 +1,38 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go (keep go.sum committed for reproducible builds)
+
+# Config with secrets
+config/config.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build
+/bin
+/dist
+/web/dist
+engine/bin/
+engine/obj/
+VmRuntime/bin/
+VmRuntime/obj/
+testdata/dotnet-fixture/out/
+testdata/dotnet-fixture/bin/
+testdata/dotnet-fixture/obj/
+
+# Local DB
+*.db
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

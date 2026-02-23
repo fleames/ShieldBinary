@@ -1,0 +1,37 @@
+# ShieldBinary configuration
+# Copy to config.yaml and adjust. Env vars override (prefix: SHIELD_).
+
+environment: development
+http_port: 8080
+
+redis_addr: localhost:6379
+redis_password: ""
+redis_db: 0
+
+# Hetzner Object Storage (S3-compatible)
+storage_endpoint: https://fsn1.your-objectstorage.com
+storage_bucket: shieldbinary
+storage_access_key: ""
+storage_secret_key: ""
+storage_use_ssl: true
+storage_presigned_expiry: 60
+storage_local_path: ./storage
+
+# Path to shieldbinary-engine executable (or leave empty for ./engine/)
+engine_path: ""
+# Path to native PE loader (for packing native binaries; leave empty for bin/loader.exe)
+native_loader_path: ""
+
+jwt_secret: "change-me-in-production"
+jwt_expire_mins: 1440
+database_path: ./shieldbinary.db
+
+# Path to built frontend (optional; for production Docker)
+# web_root: /app/web
+
+# Rate limiting (0 = disabled)
+# rate_limit_jobs_per_hour: 20
+# rate_limit_auth_per_15min: 10
+
+# CORS allowed origins (comma-separated; "*" = allow all, "" = same-origin only)
+# cors_origins: "*"

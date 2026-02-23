@@ -1,0 +1,245 @@
+# ShieldBinary
+
+Binary protection SaaS — harden, obfuscate, and encrypt Windows executables (.exe, .dll) for native PE and .NET assemblies.
+
+## Architecture
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────────────┐
+│   Frontend   │────▶│  API (Go)     │────▶│   Redis Job Queue    │
+│  (React SPA) │     │  :8080        │     └──────────┬───────────┘
+└──────────────┘     └──────────────┘                │
+                                                      ▼
+                                          ┌───────────────────────┐
+                                          │   Worker (Go)          │
+                                          │   .NET engine or       │
+                                          │   native packer        │
+                                          └───────────────────────┘
+```
+
+## Quick start
+
+### Prerequisites
+
+| Tool   | Purpose                    |
+|--------|----------------------------|
+| Go 1.22+ | API, worker               |
+| .NET 8 SDK | Protection engine       |
+| Node 20+ | Frontend build/dev       |
+| Redis  | Job queue (or Docker)      |
+| Docker | Optional: Redis + full stack |
+
+### Launch (pick one)
+
+**1. One-command local (recommended)** — Builds engine/loader if needed, starts Redis (Docker), API, worker, frontend:
+
+```powershell
+# Windows
+.\scripts\run.ps1
+```
+
+```bash
+# Linux / macOS
+./scripts/run.sh
+```
+
+Opens: **Dashboard** http://localhost:3000 · **API** http://localhost:8080 · **API Docs** http://localhost:8080/api/v1/docs
+
+**2. Docker only** — API + worker + Redis + built frontend (no native PE packing):
+
+```bash
+docker compose up --build
+# Dashboard & API: http://localhost:8080
+```
+
+**3. Manual** — Run each service in a separate terminal:
+
+```bash
+# T1: Redis
+docker run -p 6379:6379 redis:7-alpine
+
+# T2: API
+go run ./cmd/api
+
+# T3: Worker
+go run ./cmd/worker
+
+# T4: Frontend
+cd web && npm install && npm run dev
+```
+
+### Config
+
+```bash
+cp config/config.yaml.example config/config.yaml
+# Edit or use SHIELD_* env vars (see .env.example)
+```
+
+**Auth:** Set `SHIELD_JWT_SECRET` for registration/login. Omit for dev mode (built-in user). User data: SQLite (`database_path`).
+
+**Rate limiting:** 20 jobs/hour, 10 auth attempts/15 min per IP. Set to 0 to disable.
+
+**Storage:** Local `./storage/` when S3 not configured. Worker auto-detects .NET vs native PE. Engine: `bin/engine/`; loader: `bin/loader.exe` (Windows).
+
+### Command-line protection (single file)
+
+Use `shieldbinary-protect` to protect a file directly (no API/worker needed). Auto-detects .NET vs native PE:
+
+```bash
+go build -o bin/protect.exe ./cmd/protect
+bin/protect.exe input.exe output.exe basic
+```
+
+Requires the engine (`bin/engine/`) for .NET and loader (`bin/loader.exe`) for native PE.
+
+### Build native loader (Windows only, for native PE packing)
+
+```bash
+go build -ldflags "-s -w" -o bin/loader.exe ./cmd/loader
+```
+
+Place `loader.exe` in `bin/` or set `SHIELD_NATIVE_LOADER_PATH`. Native packing runs only on Windows.
+
+### Build .NET engine
+
+```bash
+cd engine
+dotnet publish -c Release -r win-x64 --self-contained -o ../bin/engine
+# For Linux (Hetzner):
+dotnet publish -c Release -r linux-x64 --self-contained -o ../bin/engine
+```
+
+Set `SHIELD_ENGINE_PATH` to the engine executable path.
+
+### .NET apps: "application to execute does not exist"
+
+Framework-dependent .NET apps (e.g. `MyApp.exe` + `MyApp.dll`) need all files together. The native packer protects the exe; the loader extracts and runs it from the **same folder as the loader**. So:
+
+1. **Put the protected exe in the original app folder** (where `MyApp.dll`, `MyApp.runtimeconfig.json`, `MyApp.deps.json` exist).
+2. Run the protected exe from that folder — the loader will run the app there so it can find its .dll.
+
+**Alternative (more reliable):** Protect the .dll instead of the exe. The exe is just a launcher.
+```bash
+cd path\to\MyApp
+bin\protect.exe MyApp.dll protected.dll minimal
+# Copy protected.dll into the folder, rename to MyApp.dll (replace original)
+# Run the original MyApp.exe — it will load your protected MyApp.dll
+```
+
+### Verify executables work after protection
+
+Integration tests ensure protected binaries still run correctly:
+
+```bash
+# Using Make
+make build-engine          # or: make build-engine RID=linux-x64
+make build-loader          # Windows only, for native test
+make test-integration
+
+# Or manually
+dotnet publish engine/ -c Release -r win-x64 --self-contained -o bin/engine
+go build -ldflags "-s -w" -o bin/loader.exe ./cmd/loader   # Windows, for native test
+go test -v ./internal/integration/
+```
+
+Tests build a minimal .NET fixture, protect it with the engine, run the protected output, and verify stdout and exit code. Pro and Enterprise tiers are also tested. Native pack execution is tested on Windows only (requires built loader).
+
+**Note:** Protected .NET assemblies are framework-dependent by default. To run `protected.dll`, place a `protected.runtimeconfig.json` next to it (copy from your original app's `*.runtimeconfig.json` and rename), or use `dotnet protected.dll` with .NET SDK installed.
+
+### Debugging protection issues
+
+When a protected program crashes or behaves incorrectly:
+
+```powershell
+# Verbose mode: see each pass as it runs, full stack trace on failure
+$env:SHIELD_ENGINE_VERBOSE = "1"
+bin/protect.exe myapp.dll out.dll basic
+# Or: bin/protect.exe myapp.dll out.dll basic -v
+
+# Isolate which pass causes the crash: run only specific passes
+$env:SHIELD_ENGINE_PASSES = "symbol_stripping"
+bin/protect.exe myapp.dll out.dll basic
+
+# Skip name/string obfuscation (max compatibility, works on any tier)
+$env:SHIELD_ENGINE_SAFE = "1"
+bin/protect.exe myapp.dll out.dll basic
+```
+
+Pass names: `symbol_stripping`, `anti_ildasm`, `name_obfuscation`, `string_encryption`, `constant_encoding`, `opaque_predicates`, `anti_debug`, `anti_tamper`, `control_flow_flattening`, `dead_code_insertion`, `virtualization`, `metadata_cleanup`.
+
+## Project layout
+
+| Path | Description |
+|------|--------------|
+| `cmd/api` | Go HTTP API server |
+| `cmd/loader` | Native PE loader stub (Windows) |
+| `cmd/protect` | CLI to protect a single file (.NET or native) |
+| `cmd/worker` | Go job processor (calls .NET engine or native packer) |
+| `internal/api` | Handlers, auth, routes |
+| `internal/config` | Configuration loading |
+| `internal/queue` | Redis job queue |
+| `internal/storage` | Local + S3 storage |
+| `internal/worker` | Worker logic |
+| `engine/` | .NET protection pipeline (dnlib) |
+| `web/` | React dashboard |
+| `config/` | YAML config template |
+
+## Protection tiers
+
+- **Minimal** — Symbol stripping + metadata cleanup. No obfuscation. Use when other tiers crash.
+- **Basic** — .NET: symbol stripping, string encryption, IL virtualization, metadata cleanup. Native: AES+compression packing.
+- **Pro** — Basic + anti-ILDASM, constant encoding, opaque predicates (.NET); + padding (native). (Virtualization already in Basic.)
+- **Enterprise** — Pro + name obfuscation, control-flow flattening, anti-debug, anti-tamper, **IL virtualization** (.NET); + XOR layer (native).
+
+### IL virtualization (Themida/VMProtect-style)
+
+Enterprise tier includes **code virtualization** by default: method IL is compiled to custom VM bytecode and executed by an interpreter at runtime. Original logic is hidden in virtualized form.
+
+- **Toggle:** Set `engine_virtualization: false` in `config/config.yaml` or `SHIELD_ENGINE_VIRTUALIZATION=0` to disable (applies to Basic and Enterprise).
+- **Requirement:** Deploy `ShieldBinary.VmRuntime.dll` alongside your protected assembly (same directory or probing path).
+- **Scope:** Applies to ~40% of eligible methods (no exception handlers, no byrefs). Entry point, constructors, and abstract/P/Invoke methods are skipped.
+
+### Lower output entropy
+
+High-entropy binaries can trigger AV heuristics. Set `engine_low_entropy: true` or `SHIELD_ENGINE_LOW_ENTROPY=1` to use deterministic encoding: fixed string-encryption key, deterministic constant encoding coefficients, and stable helper-type names. Protection remains effective; output entropy is reduced.
+
+### Pro tier stability
+
+If **Pro** crashes on your app (e.g. reflection-heavy, game tools):
+
+1. **Use safe Pro mode** — runs Pro with only Basic + AntiILDASMPass:
+   ```powershell
+   $env:SHIELD_ENGINE_SAFE_PRO = "1"
+   # Then run protect or start worker with this env set
+   ```
+   For the worker (API flow), set `engine_safe_pro: true` in `config/config.yaml` or `SHIELD_ENGINE_SAFE_PRO=1` in the worker's environment.
+
+2. **Isolate the failing pass** — run specific passes to find the culprit:
+   ```powershell
+   $env:SHIELD_ENGINE_PASSES = "symbol_stripping,anti_ildasm,string_encryption,constant_encoding"
+   bin/protect.exe myapp.dll out.dll pro
+   ```
+   Add/remove passes until you identify which one causes the crash.
+
+3. **Fall back to Basic** — if Pro remains unstable, Basic is the most compatible tier.
+
+**Other env vars:** `SHIELD_ENGINE_SAFE=1` skips name obfuscation and string encryption (any tier). `SHIELD_ENGINE_VERBOSE=1` logs each pass. `SHIELD_ENGINE_LOW_ENTROPY=1` uses deterministic encoding to reduce output entropy (helps avoid AV heuristic triggers).
+
+## Hetzner deployment
+
+1. Provision a VPS (Ubuntu 22.04)
+2. Install Docker + Docker Compose
+3. Configure Hetzner Object Storage (S3-compatible) for binaries
+4. Set `SHIELD_*` env vars (Redis, storage, JWT secret)
+5. `docker compose up -d`
+
+**Note:** Linux Docker deployment only supports .NET protection. Native PE packing needs a Windows worker (e.g. a separate Windows VM running the worker).
+
+### Health checks
+
+- `GET /health` — Liveness (always 200 if server is up)
+- `GET /ready` — Readiness (200 if Redis is reachable; 503 otherwise)
+
+## License
+
+Proprietary — see LICENSE.

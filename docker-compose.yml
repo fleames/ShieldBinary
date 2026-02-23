@@ -1,0 +1,32 @@
+services:
+  api:
+    build: .
+    command: /app/api
+    ports:
+      - "8080:8080"
+    environment:
+      SHIELD_REDIS_ADDR: redis:6379
+      SHIELD_ENVIRONMENT: development
+    depends_on:
+      - redis
+
+  # Worker: .NET protection only in Docker (Linux). Native PE needs Windows worker.
+  worker:
+    build: .
+    command: /app/worker
+    environment:
+      SHIELD_REDIS_ADDR: redis:6379
+      SHIELD_ENGINE_PATH: /app/engine/shieldbinary-engine
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+
+volumes:
+  redis-data:
