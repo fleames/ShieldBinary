@@ -16,19 +16,20 @@ import (
 )
 
 const (
-	magic       = "SBP2" // v2: AES + gzip
-	magicLen    = 4
-	keyLen      = 32
-	ivLen       = aes.BlockSize
-	lengthLen   = 8
-	flagsLen    = 1
-	footerLen   = keyLen + lengthLen + flagsLen
-	flagEntXOR  = 1 // Enterprise: extra XOR layer
+	magicV3   = "SBP3" // v3: AES-GCM + gzip (authenticated encryption)
+	magicV2   = "SBP2" // v2: AES-CTR + gzip (legacy read compatibility in loader)
+	magicLen  = 4
+	keyLen    = 32
+	nonceLen  = 12 // GCM standard nonce size
+	lengthLen = 8
+	flagsLen  = 1
+	footerLen = keyLen + lengthLen + flagsLen
+	flagNoop  = 0
 )
 
-// Pack creates a protected native PE: compresses, encrypts with AES-256-CTR,
+// Pack creates a protected native PE: compresses, encrypts with AES-256-GCM,
 // and prepends a loader stub. The output runs the original binary at runtime.
-// Tier affects protection level: basic=AES+gzip, pro=+padding, enterprise=+double layer.
+// Tier affects protection level: basic=AEAD+gzip, pro/enterprise=+padding.
 func Pack(inputPath, outputPath, loaderPath, tier string) error {
 	loader, err := os.ReadFile(loaderPath)
 	if err != nil {
@@ -68,57 +69,44 @@ func Pack(inputPath, outputPath, loaderPath, tier string) error {
 		}
 	}
 
-	// AES-256-CTR encrypt with key derivation
+	// Encrypt with AEAD (AES-256-GCM) so tampering is detected before execution.
 	keySeed := make([]byte, keyLen)
 	if _, err := rand.Read(keySeed); err != nil {
 		return fmt.Errorf("rand key: %w", err)
 	}
-	nonce := make([]byte, ivLen)
+	nonce := make([]byte, nonceLen)
 	if _, err := rand.Read(nonce); err != nil {
 		return fmt.Errorf("rand nonce: %w", err)
 	}
-	// Derive key: SHA256(seed || nonce) for additional entropy
-	h := sha256.New()
-	h.Write(keySeed)
-	h.Write(nonce)
-	key := h.Sum(nil)
+	key := deriveKey(keySeed, nonce)
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return fmt.Errorf("aes: %w", err)
 	}
-	stream := cipher.NewCTR(block, nonce)
-	encrypted := make([]byte, len(compressed))
-	stream.XORKeyStream(encrypted, compressed)
-
-	// Enterprise: second encryption layer (simple XOR with derived key)
-	if tier == "enterprise" {
-		deriveKey := key[0] ^ key[16]
-		for i := range encrypted {
-			encrypted[i] ^= deriveKey ^ byte(i%256)
-		}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return fmt.Errorf("gcm: %w", err)
 	}
+	encrypted := gcm.Seal(nil, nonce, compressed, nil)
 
 	// Footer: store keySeed (not derived key) so loader can derive same key
-	var flags byte
-	if tier == "enterprise" {
-		flags |= flagEntXOR
-	}
+	var flags byte = flagNoop
 	footer := make([]byte, footerLen)
 	copy(footer, keySeed)
-	binary.LittleEndian.PutUint64(footer[keyLen:], uint64(ivLen+len(encrypted)))
+	binary.LittleEndian.PutUint64(footer[keyLen:], uint64(nonceLen+len(encrypted)))
 	footer[keyLen+lengthLen] = flags
 
 	// Embed payload in last PE section (avoids "strange overlay" heuristic)
-	payload := make([]byte, 0, magicLen+ivLen+len(encrypted)+footerLen)
-	payload = append(payload, magic...)
+	payload := make([]byte, 0, magicLen+nonceLen+len(encrypted)+footerLen)
+	payload = append(payload, magicV3...)
 	payload = append(payload, nonce...)
 	payload = append(payload, encrypted...)
 	payload = append(payload, footer...)
 
 	outBuf, err := embedPayloadInPE(loader, payload)
 	if err != nil {
-		// Fallback: SBP2 overlay (section embed can fail on some loader PEs)
+		// Fallback: overlay format (section embed can fail on some loader PEs)
 		var buf bytes.Buffer
 		buf.Write(loader)
 		buf.Write(payload)
@@ -132,6 +120,51 @@ func Pack(inputPath, outputPath, loaderPath, tier string) error {
 		}
 	}
 	return os.WriteFile(outputPath, outBuf, 0755)
+}
+
+func deriveKey(seed, nonce []byte) []byte {
+	h := sha256.New()
+	h.Write(seed)
+	h.Write(nonce)
+	return h.Sum(nil)
+}
+
+// unpackPayloadV3 decrypts/decompresses an SBP3 payload block.
+// It is used by tests to verify integrity and compatibility behavior.
+func unpackPayloadV3(payload []byte) ([]byte, error) {
+	if len(payload) < magicLen+nonceLen+footerLen {
+		return nil, fmt.Errorf("payload too short")
+	}
+	if string(payload[:magicLen]) != magicV3 {
+		return nil, fmt.Errorf("invalid magic")
+	}
+	nonce := payload[magicLen : magicLen+nonceLen]
+	ciphertext := payload[magicLen+nonceLen : len(payload)-footerLen]
+	keySeed := payload[len(payload)-footerLen : len(payload)-footerLen+keyLen]
+	key := deriveKey(keySeed, nonce)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	decompressedBytes, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("auth failed: %w", err)
+	}
+	gr, err := gzip.NewReader(bytes.NewReader(decompressedBytes))
+	if err != nil {
+		return nil, err
+	}
+	defer gr.Close()
+	out, err := io.ReadAll(gr)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // PackLegacy creates a protected native PE using XOR (v1 format) for loaders that don't support SBP2.

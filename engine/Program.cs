@@ -39,7 +39,26 @@ public static class Program
             var options = JsonSerializer.Deserialize<EngineOptions>(optionsJson) ?? new EngineOptions();
             var onlyPasses = Environment.GetEnvironmentVariable("SHIELD_ENGINE_PASSES"); // e.g. "symbol_stripping,name_obfuscation"
             var lowEntropy = string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_LOW_ENTROPY"), "1", StringComparison.OrdinalIgnoreCase);
-            var ctx = new PipelineContext(inputPath, outputPath, tier, options, lowEntropy) { OnlyPasses = onlyPasses };
+            var renameMode = ResolveRenameMode(options.RenameMode, Environment.GetEnvironmentVariable("SHIELD_ENGINE_RENAME_MODE"));
+            var allowUnsafeRename = options.AllowUnsafeRename ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_RENAME_UNSAFE"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableResourceEncryption = options.EncryptResources ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_RESOURCE_ENCRYPT"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableReferenceProxy = options.ReferenceProxy ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_REFERENCE_PROXY"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableIlMutation = options.IlMutation ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_IL_MUTATION"), "1", StringComparison.OrdinalIgnoreCase);
+            var ctx = new PipelineContext(
+                inputPath,
+                outputPath,
+                tier,
+                options,
+                lowEntropy,
+                renameMode,
+                allowUnsafeRename,
+                enableResourceEncryption,
+                enableReferenceProxy,
+                enableIlMutation) { OnlyPasses = onlyPasses };
             RunPipeline(ctx);
             return 0;
         }
@@ -178,7 +197,10 @@ public static class Program
             new SymbolStrippingPass(),
             new AntiILDASMPass(),
             new StringEncryptionPass(),
+            new ResourceEncryptionPass(),
+            new ReferenceProxyPass(),
             new ConstantEncodingPass(),
+            new IlMutationPass(),
             new OpaquePredicatesPass(),
             new MetadataCleanupPass(),
             // Set SHIELD_ENGINE_SAFE_PRO=1 to skip constant_encoding, opaque_predicates if app crashes
@@ -189,7 +211,10 @@ public static class Program
             new AntiILDASMPass(),
             new NameObfuscationPass(),
             new StringEncryptionPass(),
+            new ResourceEncryptionPass(),
+            new ReferenceProxyPass(),
             new ConstantEncodingPass(),
+            new IlMutationPass(),
             new OpaquePredicatesPass(),
             new AntiDebugPass(),
             new AntiTamperPass(),
@@ -200,12 +225,32 @@ public static class Program
         },
         _ => throw new ArgumentException($"Unknown tier: {tier}. Use: minimal, basic, pro, enterprise"),
     };
+
+    private static RenameMode ResolveRenameMode(string? optionValue, string? envValue)
+    {
+        var raw = string.IsNullOrWhiteSpace(envValue) ? optionValue : envValue;
+        if (string.IsNullOrWhiteSpace(raw))
+            return RenameMode.Random;
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "random" => RenameMode.Random,
+            "sequential" => RenameMode.Sequential,
+            "unicode" => RenameMode.Unicode,
+            "unprintable" => RenameMode.Unprintable,
+            _ => RenameMode.Random,
+        };
+    }
 }
 
 public record EngineOptions
 {
     public bool Deterministic { get; init; }
     public string[]? Protections { get; init; }
+    public string? RenameMode { get; init; } // random | sequential | unicode | unprintable
+    public bool AllowUnsafeRename { get; init; } // required for unprintable mode
+    public bool EncryptResources { get; init; } // false by default, opt-in via options/env
+    public bool ReferenceProxy { get; init; } // false by default, opt-in via options/env
+    public bool IlMutation { get; init; } // false by default, opt-in via options/env
 }
 
 public class PipelineContext
@@ -216,17 +261,45 @@ public class PipelineContext
     public EngineOptions Options { get; }
     public Random Random { get; }
     public string? OnlyPasses { get; init; } // Comma-separated pass names for debugging (null = run all)
-    public bool LowEntropy { get; }    // When true: deterministic keys, fixed coefficients to reduce output entropy
+    public bool LowEntropy { get; }    // When true: deterministic per-string/per-constant derivation to reduce output entropy
+    public RenameMode RenameMode { get; }
+    public bool AllowUnsafeRename { get; }
+    public bool EnableResourceEncryption { get; }
+    public bool EnableReferenceProxy { get; }
+    public bool EnableIlMutation { get; }
 
-    public PipelineContext(string inputPath, string outputPath, string tier, EngineOptions options, bool lowEntropy = false)
+    public PipelineContext(
+        string inputPath,
+        string outputPath,
+        string tier,
+        EngineOptions options,
+        bool lowEntropy = false,
+        RenameMode renameMode = RenameMode.Random,
+        bool allowUnsafeRename = false,
+        bool enableResourceEncryption = false,
+        bool enableReferenceProxy = false,
+        bool enableIlMutation = false)
     {
         InputPath = inputPath;
         OutputPath = outputPath;
         Tier = tier;
         Options = options;
         LowEntropy = lowEntropy;
+        RenameMode = renameMode;
+        AllowUnsafeRename = allowUnsafeRename;
+        EnableResourceEncryption = enableResourceEncryption;
+        EnableReferenceProxy = enableReferenceProxy;
+        EnableIlMutation = enableIlMutation;
         Random = options.Deterministic || lowEntropy
             ? new Random(42)
             : new Random(unchecked((int)((uint)Guid.NewGuid().GetHashCode() ^ (uint)Environment.TickCount64 ^ (uint)Environment.ProcessId))); // Multiple entropy sources so each run differs when LowEntropy=false
     }
+}
+
+public enum RenameMode
+{
+    Random,
+    Sequential,
+    Unicode,
+    Unprintable,
 }

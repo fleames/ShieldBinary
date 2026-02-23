@@ -187,9 +187,9 @@ Pass names: `symbol_stripping`, `anti_ildasm`, `name_obfuscation`, `string_encry
 ## Protection tiers
 
 - **Minimal** — Symbol stripping + metadata cleanup. No obfuscation. Use when other tiers crash.
-- **Basic** — .NET: symbol stripping, string encryption, IL virtualization, metadata cleanup. Native: AES+compression packing.
+- **Basic** — .NET: symbol stripping, string encryption, IL virtualization, metadata cleanup. Native: AES-GCM+compression packing (authenticated).
 - **Pro** — Basic + anti-ILDASM, constant encoding, opaque predicates (.NET); + padding (native). (Virtualization already in Basic.)
-- **Enterprise** — Pro + name obfuscation, control-flow flattening, anti-debug, anti-tamper, **IL virtualization** (.NET); + XOR layer (native).
+- **Enterprise** — Pro + name obfuscation, control-flow flattening, anti-debug, anti-tamper, **IL virtualization** (.NET); + padded native payload hardening.
 
 ### IL virtualization (Themida/VMProtect-style)
 
@@ -201,7 +201,7 @@ Enterprise tier includes **code virtualization** by default: method IL is compil
 
 ### Lower output entropy
 
-High-entropy binaries can trigger AV heuristics. Set `engine_low_entropy: true` or `SHIELD_ENGINE_LOW_ENTROPY=1` to use deterministic encoding: fixed string-encryption key, deterministic constant encoding coefficients, and stable helper-type names. Protection remains effective; output entropy is reduced.
+High-entropy binaries can trigger AV heuristics. Set `engine_low_entropy: true` or `SHIELD_ENGINE_LOW_ENTROPY=1` to use deterministic encoding: deterministic per-string/per-constant derivation and stable helper-type names. Protection remains effective; output entropy is reduced.
 
 ### Pro tier stability
 

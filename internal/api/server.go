@@ -51,6 +51,8 @@ func NewServer(cfg *config.Config, logger *zap.Logger, store storage.Storage, q 
 	}
 
 	r := gin.New()
+	// Limit trusted proxies to local machine by default to avoid spoofed client IPs.
+	_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	r.Use(gin.Recovery())
 	r.Use(securityHeadersMiddleware())
 	r.Use(corsMiddleware(cfg.CORSOrigins))

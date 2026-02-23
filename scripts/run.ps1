@@ -22,8 +22,8 @@ if (-not (Test-Command go)) {
     exit 1
 }
 
-Write-Host "ShieldBinary — Starting local stack" -ForegroundColor Cyan
-Write-Host ""
+Write-Host 'ShieldBinary - Starting local stack' -ForegroundColor Cyan
+Write-Host ''
 
 # --- Redis (optional) ---
 if (-not $NoRedis -and (Test-Command docker)) {
@@ -65,26 +65,26 @@ else { Write-Host "[Loader] Skipped (native PE packing optional)" -ForegroundCol
 go build -o bin/scanner.exe ./cmd/scanner 2>$null
 if (Test-Path "bin/scanner.exe") { Write-Host "[Scanner] Built (bin/scanner.exe)" -ForegroundColor Green }
 
-Write-Host ""
+Write-Host ''
 
 # --- Start services ---
-Write-Host "[API] Starting on http://localhost:8080..." -ForegroundColor Cyan
+Write-Host '[API] Starting on http://localhost:8080...' -ForegroundColor Cyan
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$root'; go run ./cmd/api" -WindowStyle Normal
 
 Start-Sleep -Seconds 2
 
-Write-Host "[Worker] Starting..." -ForegroundColor Cyan
+Write-Host '[Worker] Starting...' -ForegroundColor Cyan
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$root'; go run ./cmd/worker" -WindowStyle Normal
 
 Start-Sleep -Seconds 1
 
-Write-Host "[Frontend] Starting on http://localhost:3000..." -ForegroundColor Cyan
+Write-Host '[Frontend] Starting on http://localhost:3000...' -ForegroundColor Cyan
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$root\web'; npm run dev" -WindowStyle Normal
 
-Write-Host ""
-Write-Host "ShieldBinary is running:" -ForegroundColor Green
-Write-Host "  Dashboard: http://localhost:3000"
-Write-Host "  API:       http://localhost:8080"
-Write-Host "  API Docs:  http://localhost:8080/api/v1/docs"
-Write-Host ""
-Write-Host "Close each window to stop, or run: docker stop shieldbinary-redis  (if started)" -ForegroundColor Gray
+Write-Host ''
+Write-Host 'ShieldBinary is running:' -ForegroundColor Green
+Write-Host '  Dashboard: http://localhost:3000'
+Write-Host '  API:       http://localhost:8080'
+Write-Host '  API Docs:  http://localhost:8080/api/v1/docs'
+Write-Host ''
+Write-Host 'Close each window to stop, or run: docker stop shieldbinary-redis (if started)' -ForegroundColor Gray

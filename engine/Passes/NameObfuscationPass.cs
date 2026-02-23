@@ -8,7 +8,10 @@ namespace ShieldBinary.Engine.Passes;
 public sealed class NameObfuscationPass : IProtectionPass
 {
     private static readonly string[] ObfuscatedPrefixes = { "a", "b", "c", "d", "x", "y", "z", "m", "n", "p" };
+    private static readonly char[] UnicodeAlphabet = { 'α', 'β', 'γ', 'δ', 'λ', 'μ', 'π', 'σ', 'τ', 'ω' };
+    private static readonly string[] UnprintableJoiners = { "\u200C", "\u200D", "\u2060" };
     private readonly Dictionary<string, string> _nameMap = new();
+    private int _sequentialCounter;
 
     public string Name => "name_obfuscation";
 
@@ -103,6 +106,7 @@ public sealed class NameObfuscationPass : IProtectionPass
             if (method.Name.StartsWith("get_") || method.Name.StartsWith("set_"))
                 continue;
             ObfuscateMethod(ctx, method);
+            ObfuscateParameters(ctx, method);
         }
         foreach (var field in type.Fields)
         {
@@ -115,6 +119,14 @@ public sealed class NameObfuscationPass : IProtectionPass
             if (prop.GetMethod != null) prop.GetMethod.Name = "get_" + newPropName;
             if (prop.SetMethod != null) prop.SetMethod.Name = "set_" + newPropName;
         }
+        foreach (var evt in type.Events)
+        {
+            var newEventName = GenerateObfuscatedName(ctx, evt.FullName ?? evt.Name ?? "");
+            evt.Name = newEventName;
+            if (evt.AddMethod != null) evt.AddMethod.Name = "add_" + newEventName;
+            if (evt.RemoveMethod != null) evt.RemoveMethod.Name = "remove_" + newEventName;
+            if (evt.InvokeMethod != null) evt.InvokeMethod.Name = "raise_" + newEventName;
+        }
     }
 
     private void ObfuscateMethod(PipelineContext ctx, MethodDef method)
@@ -124,11 +136,71 @@ public sealed class NameObfuscationPass : IProtectionPass
         method.Name = GenerateObfuscatedName(ctx, method.FullName ?? method.Name ?? "");
     }
 
+    private void ObfuscateParameters(PipelineContext ctx, MethodDef method)
+    {
+        if (method.ParamDefs == null || method.ParamDefs.Count == 0)
+            return;
+        foreach (var p in method.ParamDefs)
+        {
+            // Skip return parameter metadata (sequence 0).
+            if (p.Sequence == 0)
+                continue;
+            var original = $"{method.FullName}:param:{p.Sequence}:{p.Name}";
+            p.Name = GenerateObfuscatedName(ctx, original);
+        }
+    }
+
     private string GenerateObfuscatedName(PipelineContext ctx, string original)
     {
         if (_nameMap.TryGetValue(original, out var existing))
             return existing;
 
+        string generated = ctx.RenameMode switch
+        {
+            RenameMode.Sequential => GenerateSequentialName(),
+            RenameMode.Unicode => GenerateUnicodeName(ctx),
+            RenameMode.Unprintable when ctx.AllowUnsafeRename => GenerateUnprintableName(ctx),
+            RenameMode.Unprintable => GenerateRandomLikeName(ctx, original),
+            _ => GenerateRandomLikeName(ctx, original),
+        };
+        _nameMap[original] = generated;
+        return generated;
+    }
+
+    private string GenerateSequentialName()
+    {
+        _sequentialCounter++;
+        return "n" + _sequentialCounter.ToString("X");
+    }
+
+    private string GenerateUnicodeName(PipelineContext ctx)
+    {
+        int idx;
+        int suff;
+        if (ctx.LowEntropy)
+        {
+            idx = _sequentialCounter % UnicodeAlphabet.Length;
+            _sequentialCounter++;
+            suff = _sequentialCounter;
+        }
+        else
+        {
+            idx = ctx.Random.Next(UnicodeAlphabet.Length);
+            suff = ctx.Random.Next(100, 99999);
+        }
+        return UnicodeAlphabet[idx] + suff.ToString("X");
+    }
+
+    private string GenerateUnprintableName(PipelineContext ctx)
+    {
+        var baseName = GenerateUnicodeName(ctx);
+        var j1 = UnprintableJoiners[ctx.Random.Next(UnprintableJoiners.Length)];
+        var j2 = UnprintableJoiners[ctx.Random.Next(UnprintableJoiners.Length)];
+        return "_" + j1 + baseName + j2;
+    }
+
+    private string GenerateRandomLikeName(PipelineContext ctx, string original)
+    {
         int idx;
         int suff;
         if (ctx.LowEntropy)
