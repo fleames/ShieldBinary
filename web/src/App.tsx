@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
@@ -6,13 +7,31 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Scan from './pages/Scan';
 import Tiers from './pages/Tiers';
+import Settings from './pages/Settings';
+import { Panel } from './design-system';
+
+const SETTINGS_KEY = 'shieldbinary_user_settings_v1';
+
+function applyStoredUiSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const reduce = !!parsed.forceReducedMotion;
+    const compact = !!parsed.compactDensity;
+    document.body.classList.toggle('sb-reduced-motion-force', reduce);
+    document.body.classList.toggle('sb-density-compact', compact);
+  } catch {
+    document.body.classList.remove('sb-reduced-motion-force');
+    document.body.classList.remove('sb-density-compact');
+  }
+}
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-        Loading...
+      <div style={{ maxWidth: 520, margin: '3rem auto' }}>
+        <Panel>Synchronizing secure session...</Panel>
       </div>
     );
   }
@@ -23,6 +42,10 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  useEffect(() => {
+    applyStoredUiSettings();
+  }, []);
+
   return (
     <AuthProvider>
       <Routes>
@@ -50,6 +73,14 @@ function App() {
             element={
               <RequireAuth>
                 <Tiers />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="settings"
+            element={
+              <RequireAuth>
+                <Settings />
               </RequireAuth>
             }
           />

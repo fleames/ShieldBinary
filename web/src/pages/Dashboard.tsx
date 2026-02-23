@@ -1,9 +1,11 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiErrorFromResponse } from '../lib/api';
+import { Alert, Badge, Button, Card, Panel, Progress, Select } from '../design-system';
 
 const API = '/api/v1';
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+const USER_SETTINGS_KEY = 'shieldbinary_user_settings_v1';
 
 const TIERS = [
   {
@@ -31,6 +33,17 @@ const TIERS = [
     desc: '.NET: same as Pro. Native: + extra XOR layer for stronger encryption.',
   },
 ];
+
+function readDefaultTierSetting(): string {
+  try {
+    const raw = localStorage.getItem(USER_SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const requested = typeof parsed.defaultTier === 'string' ? parsed.defaultTier : 'basic';
+    return TIERS.some((t) => t.id === requested) ? requested : 'basic';
+  } catch {
+    return 'basic';
+  }
+}
 
 const ADVANCED_TECHNIQUES: { id: string; label: string; note?: string }[] = [
   { id: 'resource_encryption', label: 'Resource encryption' },
@@ -159,12 +172,27 @@ function buildVirusTotalUrl(s?: ThreatIntelStatus): string | null {
   return null;
 }
 
+function jobStatusTone(status: string): 'neutral' | 'accent' | 'success' | 'warning' | 'danger' {
+  switch (status) {
+    case 'completed':
+      return 'success';
+    case 'failed':
+      return 'danger';
+    case 'processing':
+      return 'accent';
+    case 'queued':
+      return 'warning';
+    default:
+      return 'neutral';
+  }
+}
+
 export default function Dashboard() {
   const { authFetch } = useAuth();
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [dragOver, setDragOver] = useState(false);
-  const [selectedTier, setSelectedTier] = useState('basic');
+  const [selectedTier, setSelectedTier] = useState(readDefaultTierSetting);
   const [preset, setPreset] = useState<ProtectionPreset>('balanced');
   const [lowEntropy, setLowEntropy] = useState(false);
   const [polymorphicMode, setPolymorphicMode] = useState(false);
@@ -186,6 +214,7 @@ export default function Dashboard() {
   const supportsPolymorphicMode = PRO_OR_ENTERPRISE_TIERS.has(selectedTier);
   const supportsRenameMode = selectedTier === 'enterprise';
   const supportsLowEntropy = selectedTier !== 'minimal';
+  const isBusy = status === 'uploading' || status === 'queued' || status === 'processing';
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -612,105 +641,52 @@ export default function Dashboard() {
   useEffect(() => () => stopPolling(), [stopPolling]);
 
   return (
-    <div style={{ maxWidth: 640, margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>
+    <div style={{ maxWidth: 760, margin: '0 auto' }}>
+      <h1 className="page-title">
         Protect your binary
       </h1>
-      <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>
+      <p className="page-subtitle">
         Upload a .NET assembly or native PE — we'll harden it with obfuscation and encryption.
       </p>
 
       {(error || (status === 'failed' && jobError)) && (
-        <div
-          role="alert"
-          style={{
-            padding: '0.75rem 1rem',
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid var(--error)',
-            borderRadius: 8,
-            marginBottom: '1.5rem',
-            color: 'var(--error)',
-          }}
-        >
+        <Alert tone="danger" style={{ marginBottom: '1.5rem' }}>
           {error || jobError}
-        </div>
+        </Alert>
       )}
 
       {status !== 'idle' && status !== 'completed' && (
-        <div
-          style={{
-            padding: '1rem',
-            background: 'var(--bg-muted)',
-            borderRadius: 8,
-            marginBottom: '1.5rem',
-          }}
-        >
+        <Panel style={{ marginBottom: '1.5rem' }}>
           <div style={{ marginBottom: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.875rem' }}>
             {status} — {progress}%
           </div>
-          <div
-            style={{
-              height: 4,
-              background: 'var(--border)',
-              borderRadius: 2,
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                height: '100%',
-                width: `${progress}%`,
-                background: 'var(--accent)',
-                transition: 'width 0.3s',
-              }}
-            />
-          </div>
-        </div>
+          <Progress value={progress} />
+        </Panel>
       )}
 
       {intelFlags.length > 0 && (
-        <div style={{ marginBottom: '1rem', padding: '0.85rem', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-muted)' }}>
+        <Card style={{ marginBottom: '1rem' }}>
           <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Threat Intel Flags</div>
           <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
             {intelFlags.slice(0, 6).map((f) => (
               <div key={`${f.technique_key}-${f.state}`}>
-                <strong>{f.technique_key || 'unknown-technique'}</strong> · {f.severity || 'unknown'} · ratio {Number.isFinite(f.last_detected_ratio) ? (f.last_detected_ratio * 100).toFixed(0) : '0'}% · n={Number.isFinite(f.last_sample_count) ? f.last_sample_count : 0} · {f.state || 'unknown'}
+                <strong>{f.technique_key || 'unknown-technique'}</strong> · {f.severity || 'unknown'} · ratio {Number.isFinite(f.last_detected_ratio) ? (f.last_detected_ratio * 100).toFixed(0) : '0'}% · n={Number.isFinite(f.last_sample_count) ? f.last_sample_count : 0} · <Badge tone={f.state === 'open' ? 'warning' : 'neutral'}>{f.state || 'unknown'}</Badge>
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {status === 'completed' && (
-        <div
-          style={{
-            padding: '1rem',
-            background: 'rgba(34, 197, 94, 0.1)',
-            border: '1px solid var(--success)',
-            borderRadius: 8,
-            marginBottom: '1.5rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '1rem',
-          }}
-        >
+        <Panel tone="success" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
           <span style={{ color: 'var(--success)' }}>Protection complete</span>
-          <button
+          <Button
             onClick={handleDownload}
-            style={{
-              padding: '0.5rem 1rem',
-              background: 'var(--success)',
-              color: 'white',
-              border: 'none',
-              borderRadius: 6,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+            variant="success"
           >
             Download
-          </button>
-        </div>
+          </Button>
+        </Panel>
       )}
 
       <div
@@ -750,21 +726,11 @@ export default function Dashboard() {
       </div>
 
       <h2 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Protection tier</h2>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <div className="dash-tier-list">
         {TIERS.map((t) => (
           <label
             key={t.id}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '1rem',
-              padding: '1rem',
-              border: `1px solid ${selectedTier === t.id ? 'var(--accent)' : 'var(--border)'}`,
-              borderRadius: 8,
-              cursor: 'pointer',
-              background: selectedTier === t.id ? 'rgba(59, 130, 246, 0.1)' : 'var(--bg-elevated)',
-              opacity: status === 'uploading' || status === 'queued' || status === 'processing' ? 0.6 : 1,
-            }}
+            className={`dash-tier-card${selectedTier === t.id ? ' is-selected' : ''}${isBusy ? ' is-disabled' : ''}`}
           >
             <input
               type="radio"
@@ -772,9 +738,9 @@ export default function Dashboard() {
               value={t.id}
               checked={selectedTier === t.id}
               onChange={() => setSelectedTier(t.id)}
-              disabled={status === 'uploading' || status === 'queued' || status === 'processing'}
+              disabled={isBusy}
             />
-            <div style={{ flex: 1 }}>
+            <div className="dash-tier-copy">
               <div style={{ fontWeight: 600 }}>{t.name} — {t.price}</div>
               <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>{t.desc}</div>
             </div>
@@ -793,24 +759,16 @@ export default function Dashboard() {
         >
           Preset profile
         </label>
-        <select
+        <Select
           value={preset}
           onChange={(e) => applyPreset(e.target.value as ProtectionPreset)}
-          disabled={status === 'uploading' || status === 'queued' || status === 'processing'}
-          style={{
-            width: '100%',
-            padding: '0.55rem 0.7rem',
-            borderRadius: 8,
-            border: '1px solid var(--border)',
-            background: 'var(--bg-elevated)',
-            color: 'var(--text)',
-            marginBottom: '0.55rem',
-          }}
+          disabled={isBusy}
+          style={{ marginBottom: '0.55rem' }}
         >
           <option value="compatibility">Compatibility</option>
           <option value="balanced">Balanced</option>
           {supportsPolymorphicMode && <option value="polymorphic">Polymorphic</option>}
-        </select>
+        </Select>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
           Compatibility = low-entropy safe defaults, Balanced = general defaults, Polymorphic = high-variance templates.
         </div>
@@ -835,7 +793,7 @@ export default function Dashboard() {
             type="checkbox"
             checked={lowEntropy}
             onChange={(e) => setLowEntropy(e.target.checked)}
-            disabled={status === 'uploading' || status === 'queued' || status === 'processing'}
+            disabled={isBusy}
           />
           <span>
             <strong>Low entropy</strong> — Deterministic encoding (fixed keys, reproducible output for testing)
@@ -863,7 +821,7 @@ export default function Dashboard() {
             type="checkbox"
             checked={polymorphicMode}
             onChange={(e) => setPolymorphicMode(e.target.checked)}
-            disabled={status === 'uploading' || status === 'queued' || status === 'processing' || lowEntropy}
+            disabled={isBusy || lowEntropy}
           />
           <span>
             <strong>Polymorphic mode</strong> — Higher-variance IL templates per build
@@ -888,7 +846,7 @@ export default function Dashboard() {
         <select
           value={renameMode}
           onChange={(e) => setRenameMode(e.target.value as 'random' | 'sequential' | 'unicode' | 'unprintable')}
-          disabled={status === 'uploading' || status === 'queued' || status === 'processing'}
+          disabled={isBusy}
           style={{
             width: '100%',
             padding: '0.55rem 0.7rem',
@@ -919,7 +877,7 @@ export default function Dashboard() {
                 type="checkbox"
                 checked={selectedProtections.includes(tech.id)}
                 onChange={() => toggleProtection(tech.id)}
-                disabled={status === 'uploading' || status === 'queued' || status === 'processing'}
+                disabled={isBusy}
               />
               <span style={{ fontSize: '0.84rem' }}>
                 {tech.label}
@@ -932,40 +890,13 @@ export default function Dashboard() {
       )}
 
       <div style={{ marginTop: '2rem', display: 'flex', gap: '0.75rem' }}>
-        <button
-          disabled={!file || status === 'uploading' || status === 'queued' || status === 'processing'}
-          onClick={handleProtect}
-          style={{
-            padding: '0.75rem 1.5rem',
-            background: file && status !== 'uploading' && status !== 'queued' && status !== 'processing' ? 'var(--accent)' : 'var(--bg-muted)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontFamily: 'var(--font-sans)',
-            fontWeight: 600,
-            cursor: file && status !== 'uploading' && status !== 'queued' && status !== 'processing' ? 'pointer' : 'not-allowed',
-          }}
-        >
-          {status === 'uploading' || status === 'queued' || status === 'processing'
-            ? 'Processing...'
-            : 'Protect & process'}
-        </button>
+        <Button disabled={!file || isBusy} onClick={handleProtect} size="lg">
+          {isBusy ? 'Processing...' : 'Protect & process'}
+        </Button>
         {(status === 'completed' || status === 'failed') && (
-          <button
-            onClick={handleReset}
-            style={{
-              padding: '0.75rem 1.5rem',
-              background: 'var(--bg-muted)',
-              color: 'var(--text)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              fontFamily: 'var(--font-sans)',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
+          <Button onClick={handleReset} variant="ghost" size="lg">
             Start over
-          </button>
+          </Button>
         )}
       </div>
 
@@ -977,52 +908,27 @@ export default function Dashboard() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <button
+            <Button
               onClick={handleClearHistory}
               disabled={jobsLoading || displayJobs.length === 0}
-              style={{
-                padding: '0.35rem 0.6rem',
-                background: 'transparent',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                color: 'var(--text-muted)',
-                fontSize: '0.75rem',
-                cursor: jobsLoading || displayJobs.length === 0 ? 'not-allowed' : 'pointer',
-                opacity: jobsLoading || displayJobs.length === 0 ? 0.6 : 1,
-              }}
+              variant="ghost"
+              size="sm"
             >
               Clear history
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => { setJobsLoading(true); fetchJobs(); }}
               disabled={jobsLoading}
-              style={{
-                padding: '0.35rem 0.6rem',
-                background: 'var(--bg-muted)',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                color: 'var(--text-muted)',
-                fontSize: '0.75rem',
-                cursor: jobsLoading ? 'wait' : 'pointer',
-                opacity: jobsLoading ? 0.7 : 1,
-              }}
+              variant="ghost"
+              size="sm"
             >
               {jobsLoading ? 'Refreshing...' : 'Refresh'}
-            </button>
+            </Button>
           </div>
           {displayJobs.map((j) => (
             <div
               key={j.job_id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '1rem',
-                padding: '0.75rem 1rem',
-                background: 'var(--bg-muted)',
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-              }}
+              className={`dash-job-row${j.status === 'failed' ? ' is-failed' : ''}${j.status === 'processing' ? ' is-processing' : ''}${j.status === 'queued' ? ' is-queued' : ''}${j.status === 'completed' ? ' is-completed' : ''}`}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -1041,19 +947,30 @@ export default function Dashboard() {
                       {j.binary_type}
                     </span>
                   )}{' '}
-                  · {j.status}
+                  <span className="dash-job-status"><Badge tone={jobStatusTone(j.status)}>{j.status}</Badge></span>
                   {j.polymorphic_mode && ' · polymorphic'}
                   {j.protections && j.protections.length > 0 && ` · ${j.protections.length} opt-ins`}
                   {j.error && ` · ${j.error}`}
                 </div>
-                {expandedJobId === j.job_id && (
-                  <div style={{ marginTop: '0.45rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                <div className={`dash-job-details${expandedJobId === j.job_id ? ' is-open' : ''}`}>
                     <div>
                       Job: <strong>{j.job_id}</strong>
                     </div>
                     <div>
                       Status: <strong>{j.status}</strong>
                       {typeof j.progress === 'number' && ` · ${j.progress}%`}
+                    </div>
+                    <div>
+                      Opt-ins used:{' '}
+                      {j.protections && j.protections.length > 0 ? (
+                        <span style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', verticalAlign: 'middle' }}>
+                          {j.protections.map((p) => (
+                            <Badge key={`${j.job_id}-${p}`} tone="accent">{p}</Badge>
+                          ))}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>none</span>
+                      )}
                     </div>
                     {j.strength_score && (
                       <div>
@@ -1109,127 +1026,74 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
-                )}
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <button
+                <Button
                   onClick={() => setExpandedJobId((prev) => prev === j.job_id ? null : j.job_id)}
-                  style={{
-                    padding: '0.4rem 0.75rem',
-                    background: 'var(--bg-muted)',
-                    color: 'var(--text)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    fontSize: '0.875rem',
-                    cursor: 'pointer',
-                  }}
+                  variant="ghost"
+                  size="sm"
                   title="Toggle details"
                 >
                   {expandedJobId === j.job_id ? 'Hide details' : 'Details'}
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => handleDeleteJob(j.job_id)}
-                  style={{
-                    padding: '0.4rem 0.75rem',
-                    background: 'transparent',
-                    color: 'var(--text-muted)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    fontSize: '0.875rem',
-                    cursor: 'pointer',
-                  }}
+                  variant="danger"
+                  size="sm"
                   title="Delete job"
                 >
                   Delete
-                </button>
+                </Button>
                 {j.status === 'completed' && j.output_key && (
-                  <button
+                  <Button
                     onClick={() => handleDownloadJob(j.job_id, j.input_key)}
-                    style={{
-                      padding: '0.4rem 0.75rem',
-                      background: 'var(--accent)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: 6,
-                      fontSize: '0.875rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
+                    variant="success"
+                    size="sm"
                   >
                     Download
-                  </button>
+                  </Button>
                 )}
                 {j.status === 'completed' && (
-                  <button
+                  <Button
                     onClick={() => submitThreatIntel(j.job_id)}
                     disabled={intelSubmittingJobId === j.job_id || intelByJob[j.job_id]?.submitted}
-                    style={{
-                      padding: '0.4rem 0.75rem',
-                      background: intelByJob[j.job_id]?.submitted ? 'var(--bg-muted)' : 'transparent',
-                      color: 'var(--text)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      fontSize: '0.82rem',
-                      cursor: intelSubmittingJobId === j.job_id ? 'wait' : 'pointer',
-                    }}
+                    variant="info"
+                    size="sm"
                     title="Manual opt-in threat intelligence submission"
                   >
                     {intelByJob[j.job_id]?.submitted ? 'Intel submitted' : intelSubmittingJobId === j.job_id ? 'Submitting…' : 'Submit to Threat Intel'}
-                  </button>
+                  </Button>
                 )}
                 {j.status === 'completed' && intelByJob[j.job_id]?.submitted && buildVirusTotalUrl(intelByJob[j.job_id]) && (
-                  <button
+                  <Button
                     onClick={() => window.open(buildVirusTotalUrl(intelByJob[j.job_id]) as string, '_blank', 'noopener,noreferrer')}
-                    style={{
-                      padding: '0.4rem 0.75rem',
-                      background: 'transparent',
-                      color: 'var(--accent)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      fontSize: '0.82rem',
-                      cursor: 'pointer',
-                    }}
+                    variant="info"
+                    size="sm"
                     title="Open VirusTotal result page"
                   >
                     Open VT
-                  </button>
+                  </Button>
                 )}
                 {j.status === 'failed' && (
                   <>
-                    <button
+                    <Button
                       onClick={() => handleRetryJob(j)}
                       disabled={retryingId === j.job_id}
-                      style={{
-                        padding: '0.4rem 0.75rem',
-                        background: 'var(--bg-muted)',
-                        color: 'var(--text)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 6,
-                        fontSize: '0.875rem',
-                        fontWeight: 600,
-                        cursor: retryingId === j.job_id ? 'wait' : 'pointer',
-                      }}
+                      variant="warning"
+                      size="sm"
                     >
                       {retryingId === j.job_id ? 'Retrying...' : 'Retry'}
-                    </button>
+                    </Button>
                     {j.retry_suggestions && j.retry_suggestions.length > 0 && (
-                      <button
+                      <Button
                         onClick={() => handleRetryJob(j, j.retry_suggestions?.[0])}
                         disabled={retryingId === j.job_id}
-                        style={{
-                          padding: '0.4rem 0.75rem',
-                          background: 'var(--accent)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: 6,
-                          fontSize: '0.82rem',
-                          fontWeight: 600,
-                          cursor: retryingId === j.job_id ? 'wait' : 'pointer',
-                        }}
+                        variant="primary"
+                        size="sm"
                         title={j.retry_suggestions?.[0]?.reason || 'Retry with suggested fix'}
                       >
                         Suggested retry
-                      </button>
+                      </Button>
                     )}
                   </>
                 )}
