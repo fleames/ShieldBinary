@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -26,6 +27,7 @@ type JobPayload struct {
 	Tier        string   `json:"tier"`
 	BinaryType  string   `json:"binary_type"`
 	LowEntropy  bool     `json:"low_entropy"`
+	Polymorphic bool     `json:"polymorphic_mode"`
 	Protections []string `json:"protections,omitempty"`
 	Status      string   `json:"status"`
 	Progress    int      `json:"progress"`
@@ -122,9 +124,16 @@ func (q *Queue) SetJobError(ctx context.Context, jobID, errMsg string) error {
 func (q *Queue) StoreJob(ctx context.Context, job *JobPayload) error {
 	key := QueuePrefix + job.ID
 	userJobsKey := UserJobsPrefix + job.UserID + UserJobsSuffix
+	protectionsJSON := "[]"
+	if len(job.Protections) > 0 {
+		if b, err := json.Marshal(job.Protections); err == nil {
+			protectionsJSON = string(b)
+		}
+	}
 	pipe := q.client.Pipeline()
 	pipe.HSet(ctx, key, "id", job.ID, "user_id", job.UserID, "input_key", job.InputKey,
-		"tier", job.Tier, "binary_type", job.BinaryType, "status", "queued", "progress", 0)
+		"tier", job.Tier, "binary_type", job.BinaryType, "status", "queued", "progress", 0,
+		"low_entropy", boolToString(job.LowEntropy), "polymorphic_mode", boolToString(job.Polymorphic), "protections", protectionsJSON)
 	pipe.Expire(ctx, key, time.Duration(JobTTL)*time.Second)
 	pipe.LPush(ctx, userJobsKey, job.ID)
 	pipe.Expire(ctx, userJobsKey, time.Duration(JobTTL)*time.Second)
@@ -152,21 +161,51 @@ func (q *Queue) GetJob(ctx context.Context, jobID string) (*JobPayload, error) {
 		return nil, nil
 	}
 	return &JobPayload{
-		ID:         m["id"],
-		UserID:     m["user_id"],
-		InputKey:   m["input_key"],
-		OutputKey:  m["output_key"],
-		Tier:       m["tier"],
-		BinaryType: m["binary_type"],
-		Status:     m["status"],
-		Progress:   parseInt(m["progress"]),
-		Error:      m["error"],
+		ID:          m["id"],
+		UserID:      m["user_id"],
+		InputKey:    m["input_key"],
+		OutputKey:   m["output_key"],
+		Tier:        m["tier"],
+		BinaryType:  m["binary_type"],
+		LowEntropy:  parseBool(m["low_entropy"]),
+		Polymorphic: parseBool(m["polymorphic_mode"]),
+		Protections: parseStringSliceJSON(m["protections"]),
+		Status:      m["status"],
+		Progress:    parseInt(m["progress"]),
+		Error:       m["error"],
 	}, nil
 }
 
 func parseInt(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
+}
+
+func parseBool(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func boolToString(v bool) string {
+	if v {
+		return "1"
+	}
+	return "0"
+}
+
+func parseStringSliceJSON(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // DeleteJob removes a job from Redis (hash + user list). Returns the job before deletion for storage cleanup.

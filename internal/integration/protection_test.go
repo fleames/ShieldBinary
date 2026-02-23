@@ -94,7 +94,138 @@ func TestDotNetProtection_EnterpriseTier(t *testing.T) {
 	testDotNetTier(t, "enterprise")
 }
 
+// TestDotNetProtection_AdvancedOptInPasses verifies newly added opt-in passes keep a basic app runnable.
+func TestDotNetProtection_AdvancedOptInPasses(t *testing.T) {
+	tests := []struct {
+		name     string
+		tier     string
+		envKey   string
+		envValue string
+		onlyPass string
+	}{
+		{
+			name:     "reference_proxy",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_REFERENCE_PROXY",
+			envValue: "1",
+			onlyPass: "symbol_stripping,reference_proxy,metadata_cleanup",
+		},
+		{
+			name:     "delegate_proxy",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_DELEGATE_PROXY",
+			envValue: "1",
+			onlyPass: "symbol_stripping,delegate_proxy,metadata_cleanup",
+		},
+		{
+			name:     "reflection_dispatch",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_REFLECTION_DISPATCH",
+			envValue: "1",
+			onlyPass: "symbol_stripping,reflection_dispatch,metadata_cleanup",
+		},
+		{
+			name:     "il_mutation",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_IL_MUTATION",
+			envValue: "1",
+			onlyPass: "symbol_stripping,il_mutation,metadata_cleanup",
+		},
+		{
+			name:     "constant_encoding",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_PASSES",
+			envValue: "symbol_stripping,constant_encoding,metadata_cleanup",
+			onlyPass: "symbol_stripping,constant_encoding,metadata_cleanup",
+		},
+		{
+			name:     "resource_encryption",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_RESOURCE_ENCRYPT",
+			envValue: "1",
+			onlyPass: "symbol_stripping,resource_encryption,metadata_cleanup",
+		},
+		{
+			name:     "name_obfuscation_sequential",
+			tier:     "enterprise",
+			envKey:   "SHIELD_ENGINE_RENAME_MODE",
+			envValue: "sequential",
+			onlyPass: "symbol_stripping,name_obfuscation,metadata_cleanup",
+		},
+		{
+			name:     "type_scramble",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_TYPE_SCRAMBLE",
+			envValue: "1",
+			onlyPass: "symbol_stripping,type_scramble,metadata_cleanup",
+		},
+		{
+			name:     "assembly_embed",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_ASSEMBLY_EMBED",
+			envValue: "1",
+			onlyPass: "symbol_stripping,assembly_embed,metadata_cleanup",
+		},
+		{
+			name:     "anti_decompiler",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_ANTI_DECOMPILER",
+			envValue: "1",
+			onlyPass: "symbol_stripping,anti_decompiler,metadata_cleanup",
+		},
+		{
+			name:     "anti_decompiler_aggressive",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_ANTI_DECOMPILER_AGGRESSIVE",
+			envValue: "1",
+			onlyPass: "symbol_stripping,anti_decompiler,metadata_cleanup",
+		},
+		{
+			name:     "invalid_metadata",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_INVALID_METADATA",
+			envValue: "1",
+			onlyPass: "symbol_stripping,invalid_metadata,metadata_cleanup",
+		},
+		{
+			name:     "method_body_encryption",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_METHOD_BODY_ENCRYPT",
+			envValue: "1",
+			onlyPass: "symbol_stripping,method_body_encryption,metadata_cleanup",
+		},
+		{
+			name:     "dynamic_method_generation",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_DYNAMIC_METHOD_GEN",
+			envValue: "1",
+			onlyPass: "symbol_stripping,dynamic_method_generation,metadata_cleanup",
+		},
+		{
+			name:     "polymorphic_mode",
+			tier:     "pro",
+			envKey:   "SHIELD_ENGINE_POLYMORPHIC",
+			envValue: "1",
+			onlyPass: "symbol_stripping,il_mutation,opaque_predicates,metadata_cleanup",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			testDotNetTierWithEnv(t, tc.tier, map[string]string{
+				tc.envKey:              tc.envValue,
+				"SHIELD_ENGINE_PASSES": tc.onlyPass,
+			})
+		})
+	}
+}
+
 func testDotNetTier(t *testing.T, tier string) {
+	testDotNetTierWithEnv(t, tier, nil)
+}
+
+func testDotNetTierWithEnv(t *testing.T, tier string, env map[string]string) {
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -134,6 +265,12 @@ func testDotNetTier(t *testing.T, tier string) {
 		protectCmd = exec.CommandContext(ctx, enginePath, fixturePath, protectedPath, tier)
 	}
 	protectCmd.Dir = dir
+	if len(env) > 0 {
+		protectCmd.Env = append([]string{}, os.Environ()...)
+		for k, v := range env {
+			protectCmd.Env = append(protectCmd.Env, k+"="+v)
+		}
+	}
 	if out, err := protectCmd.CombinedOutput(); err != nil {
 		t.Fatalf("engine failed for tier %s: %v\n%s", tier, err, out)
 	}
@@ -248,4 +385,57 @@ func findLoader() string {
 
 func runNativePack(input, output, loader, tier string) error {
 	return nativepacker.Pack(input, output, loader, tier)
+}
+
+// TestDotNetPublishProfiles_Smoke verifies packaging profile scripts produce expected outputs.
+// Disabled by default because publish profiles are expensive. Enable with SHIELD_RUN_PUBLISH_PROFILE_TESTS=1.
+func TestDotNetPublishProfiles_Smoke(t *testing.T) {
+	if os.Getenv("SHIELD_RUN_PUBLISH_PROFILE_TESTS") != "1" {
+		t.Skip("set SHIELD_RUN_PUBLISH_PROFILE_TESTS=1 to run publish profile smoke tests")
+	}
+	ctx := context.Background()
+	repoRoot, _ := filepath.Abs(filepath.Join("..", ".."))
+	project := filepath.Join(repoRoot, "testdata", "dotnet-fixture", "TestApp.csproj")
+	if _, err := os.Stat(project); err != nil {
+		t.Skipf("fixture project missing: %v", err)
+	}
+	if _, err := exec.LookPath("dotnet"); err != nil {
+		t.Skip("dotnet not found")
+	}
+
+	outDir := filepath.Join(t.TempDir(), "publish-profiles")
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		script := filepath.Join(repoRoot, "scripts", "publish-dotnet-profiles.ps1")
+		cmd = exec.CommandContext(ctx, "powershell",
+			"-NoProfile",
+			"-ExecutionPolicy", "Bypass",
+			"-File", script,
+			"-Project", project,
+			"-Runtime", "win-x64",
+			"-OutputDir", outDir,
+		)
+	} else {
+		script := filepath.Join(repoRoot, "scripts", "publish-dotnet-profiles.sh")
+		cmd = exec.CommandContext(ctx, "bash", script, project, "linux-x64", "Release", outDir)
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("publish profiles failed: %v\n%s", err, out)
+	}
+
+	expected := []string{
+		"baseline",
+		"r2r",
+		"singlefile",
+		"trimmed",
+		"singlefile-r2r-trimmed",
+	}
+	for _, p := range expected {
+		path := filepath.Join(outDir, p)
+		st, err := os.Stat(path)
+		if err != nil || !st.IsDir() {
+			t.Fatalf("expected output profile dir missing: %s", path)
+		}
+	}
+	// nativeaot is best-effort and may be skipped depending on app/toolchain.
 }

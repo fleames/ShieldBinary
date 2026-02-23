@@ -9,6 +9,17 @@ namespace ShieldBinary.VmRuntime;
 /// </summary>
 public static class VmRunner
 {
+    private delegate bool VmOpHandler(
+        byte[] bc,
+        int[] tokens,
+        object[] args,
+        object[] locals,
+        object[] stack,
+        ref int sp,
+        ref int ip,
+        Module module,
+        out object returnValue);
+
     /// <summary>
     /// Execute virtualized bytecode. Called from virtualized method stubs.
     /// </summary>
@@ -22,6 +33,8 @@ public static class VmRunner
     public static object Run(
         byte[] bytecode,
         int[] tokens,
+        byte[] opcodeDecodeMap,
+        byte[] dispatchSchedule,
         object[] args,
         object[] locals,
         int maxStack,
@@ -34,264 +47,353 @@ public static class VmRunner
         var sp = 0;
         var ip = 0;
         var bc = bytecode;
+        var dispatchMap = BuildRandomDispatchMap();
+        var dispatchUnmap = InvertMap(dispatchMap);
+        var dispatchMap2 = BuildRandomDispatchMap();
+        var dispatchUnmap2 = InvertMap(dispatchMap2);
+        var handlerTable = BuildHandlerTable();
 
         while (ip < bc.Length)
         {
-            var op = (VmOpcode)bc[ip++];
-
-            switch (op)
+            var encoded = bc[ip++];
+            var decoded = (opcodeDecodeMap != null && opcodeDecodeMap.Length == 256) ? opcodeDecodeMap[encoded] : encoded;
+            var op = (VmOpcode)decoded;
+            var dispatchEngine = GetDispatchEngine(dispatchSchedule, ip);
+            if (dispatchEngine == 1)
             {
-                case VmOpcode.Nop:
-                    break;
-                case VmOpcode.Dup:
-                    stack[sp] = stack[sp - 1];
-                    sp++;
-                    break;
-                case VmOpcode.Pop:
-                    sp--;
-                    break;
-
-                case VmOpcode.LdcI4:
-                    stack[sp++] = ReadI4(bc, ref ip);
-                    break;
-                case VmOpcode.LdcI8:
-                    stack[sp++] = ReadI8(bc, ref ip);
-                    break;
-                case VmOpcode.LdcR4:
-                    stack[sp++] = ReadR4(bc, ref ip);
-                    break;
-                case VmOpcode.LdcR8:
-                    stack[sp++] = ReadR8(bc, ref ip);
-                    break;
-                case VmOpcode.LdcNull:
-                    stack[sp++] = null;
-                    break;
-
-                case VmOpcode.Ldarg:
-                    stack[sp++] = args[ReadI4(bc, ref ip)];
-                    break;
-                case VmOpcode.Starg:
-                    args[ReadI4(bc, ref ip)] = stack[--sp];
-                    break;
-                case VmOpcode.Ldloc:
-                    stack[sp++] = locals[ReadI4(bc, ref ip)];
-                    break;
-                case VmOpcode.Stloc:
-                    locals[ReadI4(bc, ref ip)] = stack[--sp];
-                    break;
-
-                case VmOpcode.Add:
-                    sp--;
-                    stack[sp - 1] = Add(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.Sub:
-                    sp--;
-                    stack[sp - 1] = Sub(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.Mul:
-                    sp--;
-                    stack[sp - 1] = Mul(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.Div:
-                    sp--;
-                    stack[sp - 1] = Div(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.DivUn:
-                    sp--;
-                    stack[sp - 1] = DivUn(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.Rem:
-                    sp--;
-                    stack[sp - 1] = Rem(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.RemUn:
-                    sp--;
-                    stack[sp - 1] = RemUn(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.Neg:
-                    stack[sp - 1] = Neg(stack[sp - 1]);
-                    break;
-                case VmOpcode.And:
-                    sp--;
-                    stack[sp - 1] = And(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.Or:
-                    sp--;
-                    stack[sp - 1] = Or(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.Xor:
-                    sp--;
-                    stack[sp - 1] = Xor(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.Not:
-                    stack[sp - 1] = Not(stack[sp - 1]);
-                    break;
-                case VmOpcode.Shl:
-                    sp--;
-                    stack[sp - 1] = Shl(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.Shr:
-                    sp--;
-                    stack[sp - 1] = Shr(stack[sp - 1], stack[sp]);
-                    break;
-                case VmOpcode.ShrUn:
-                    sp--;
-                    stack[sp - 1] = ShrUn(stack[sp - 1], stack[sp]);
-                    break;
-
-                case VmOpcode.Ceq:
-                    sp--;
-                    stack[sp - 1] = object.Equals(stack[sp - 1], stack[sp]) ? 1 : 0;
-                    break;
-                case VmOpcode.Clt:
-                    sp--;
-                    stack[sp - 1] = Clt(stack[sp - 1], stack[sp]) ? 1 : 0;
-                    break;
-                case VmOpcode.CltUn:
-                    sp--;
-                    stack[sp - 1] = CltUn(stack[sp - 1], stack[sp]) ? 1 : 0;
-                    break;
-                case VmOpcode.Cgt:
-                    sp--;
-                    stack[sp - 1] = Cgt(stack[sp - 1], stack[sp]) ? 1 : 0;
-                    break;
-                case VmOpcode.CgtUn:
-                    sp--;
-                    stack[sp - 1] = CgtUn(stack[sp - 1], stack[sp]) ? 1 : 0;
-                    break;
-
-                case VmOpcode.Br:
-                    ip = ReadI4(bc, ref ip);
-                    break;
-                case VmOpcode.Beq:
-                    if (Equals(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
-                    else ip += 4;
-                    sp -= 2;
-                    break;
-                case VmOpcode.Bne:
-                    if (!Equals(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
-                    else ip += 4;
-                    sp -= 2;
-                    break;
-                case VmOpcode.Brtrue:
-                    if (IsTrue(stack[--sp])) ip = ReadI4(bc, ref ip);
-                    else ip += 4;
-                    break;
-                case VmOpcode.Brfalse:
-                    if (!IsTrue(stack[--sp])) ip = ReadI4(bc, ref ip);
-                    else ip += 4;
-                    break;
-                case VmOpcode.Bge:
-                    if (!Clt(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
-                    else ip += 4;
-                    sp -= 2;
-                    break;
-                case VmOpcode.Ble:
-                    if (Clt(stack[sp - 2], stack[sp - 1]) || Equals(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
-                    else ip += 4;
-                    sp -= 2;
-                    break;
-                case VmOpcode.Blt:
-                    if (Clt(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
-                    else ip += 4;
-                    sp -= 2;
-                    break;
-                case VmOpcode.Bgt:
-                    if (Cgt(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
-                    else ip += 4;
-                    sp -= 2;
-                    break;
-
-                case VmOpcode.Call:
-                    var callTarget = module.ResolveMethod(ReadToken(bc, ref ip, tokens));
-                    var callArgs = PopArgs(callTarget.GetParameters().Length, stack, ref sp);
-                    stack[sp++] = callTarget.Invoke(null, callArgs);
-                    break;
-                case VmOpcode.Callvirt:
-                    var virtTarget = module.ResolveMethod(ReadToken(bc, ref ip, tokens))!;
-                    var virtParamCount = virtTarget.GetParameters().Length;
-                    var virtArgs = PopArgs(virtParamCount + 1, stack, ref sp); // +1 for this
-                    var virtThis = virtArgs[0];
-                    var virtArgArr = new object[virtParamCount];
-                    Array.Copy(virtArgs, 1, virtArgArr, 0, virtParamCount);
-                    stack[sp++] = virtTarget.Invoke(virtThis, virtArgArr);
-                    break;
-                case VmOpcode.Newobj:
-                    var ctor = module.ResolveMethod(ReadToken(bc, ref ip, tokens))!;
-                    var ctorParamCount = ctor.GetParameters().Length;
-                    var ctorArgs = PopArgs(ctorParamCount, stack, ref sp);
-                    stack[sp++] = Activator.CreateInstance(ctor.DeclaringType!, ctorArgs);
-                    break;
-
-                case VmOpcode.Ldfld:
-                    var ldfld = module.ResolveField(ReadToken(bc, ref ip, tokens))!;
-                    var ldfldObj = stack[--sp];
-                    stack[sp++] = ldfld.GetValue(ldfldObj);
-                    break;
-                case VmOpcode.Stfld:
-                    var stfld = module.ResolveField(ReadToken(bc, ref ip, tokens))!;
-                    var stfldVal = stack[--sp];
-                    var stfldObj = stack[--sp];
-                    stfld.SetValue(stfldObj, stfldVal);
-                    break;
-                case VmOpcode.Ldsfld:
-                    var ldsfld = module.ResolveField(ReadToken(bc, ref ip, tokens))!;
-                    stack[sp++] = ldsfld.GetValue(null);
-                    break;
-                case VmOpcode.Stsfld:
-                    var stsfld = module.ResolveField(ReadToken(bc, ref ip, tokens))!;
-                    stsfld.SetValue(null, stack[--sp]);
-                    break;
-
-                case VmOpcode.Newarr:
-                    var arrLen = Convert.ToInt32(stack[--sp]);
-                    var arrElemToken = ReadToken(bc, ref ip, tokens);
-                    var arrElemType = arrElemToken != 0 ? module.ResolveType(arrElemToken) : typeof(object);
-                    stack[sp++] = Array.CreateInstance(arrElemType, arrLen);
-                    break;
-                case VmOpcode.Ldelem:
-                    var idx = Convert.ToInt32(stack[--sp]);
-                    var arr = stack[--sp];
-                    stack[sp++] = ((Array)arr!).GetValue(idx);
-                    break;
-                case VmOpcode.Stelem:
-                    var stelemVal = stack[--sp];
-                    var stelemIdx = Convert.ToInt32(stack[--sp]);
-                    var stelemArr = stack[--sp];
-                    ((Array)stelemArr!).SetValue(stelemVal, stelemIdx);
-                    break;
-                case VmOpcode.Ldlen:
-                    stack[sp - 1] = ((Array)stack[sp - 1]!).Length;
-                    break;
-
-                case VmOpcode.Box:
-                    var boxType = module.ResolveType(ReadToken(bc, ref ip, tokens));
-                    stack[sp - 1] = stack[sp - 1] == null ? null : Convert.ChangeType(stack[sp - 1], boxType);
-                    break;
-                case VmOpcode.Unbox:
-                    var unboxType = module.ResolveType(ReadToken(bc, ref ip, tokens));
-                    var unboxVal = stack[--sp];
-                    stack[sp++] = unboxVal == null ? null : Convert.ChangeType(unboxVal, unboxType);
-                    break;
-                case VmOpcode.Castclass:
-                    var castType = module.ResolveType(ReadToken(bc, ref ip, tokens));
-                    stack[sp - 1] = stack[sp - 1] == null ? null : Convert.ChangeType(stack[sp - 1], castType);
-                    break;
-                case VmOpcode.Isinst:
-                    var isinstType = module.ResolveType(ReadToken(bc, ref ip, tokens));
-                    var isinstVal = stack[sp - 1];
-                    stack[sp - 1] = isinstVal != null && isinstType.IsInstanceOfType(isinstVal) ? isinstVal : null;
-                    break;
-
-                case VmOpcode.Ret:
-                    return sp > 0 ? stack[sp - 1] : null;
-
-                default:
-                    throw new InvalidProgramException($"Unknown VM opcode: {op}");
+                var k = dispatchMap[(byte)op];
+                op = (VmOpcode)dispatchUnmap[k];
             }
+            else if (dispatchEngine == 2)
+            {
+                var k1 = dispatchMap[(byte)op];
+                var k2 = dispatchMap2[k1];
+                op = (VmOpcode)dispatchUnmap2[k2];
+            }
+            else if (dispatchEngine == 3)
+            {
+                var handler = handlerTable[(byte)op];
+                if (handler == null)
+                    throw new InvalidProgramException($"Unknown VM opcode: {op}");
+                if (handler(bc, tokens, args, locals, stack, ref sp, ref ip, module, out var tableResult))
+                    return tableResult;
+                continue;
+            }
+            if (ExecuteOpcode(op, bc, tokens, args, locals, stack, ref sp, ref ip, module, out var directResult))
+                return directResult;
         }
 
         return sp > 0 ? stack[sp - 1] : null;
+    }
+
+    private static VmOpHandler[] BuildHandlerTable()
+    {
+        var table = new VmOpHandler[256];
+        foreach (VmOpcode op in Enum.GetValues(typeof(VmOpcode)))
+        {
+            var captured = op;
+            table[(byte)captured] = (byte[] bc, int[] tokens, object[] args, object[] locals, object[] stack, ref int sp, ref int ip, Module module, out object returnValue) =>
+                ExecuteOpcode(captured, bc, tokens, args, locals, stack, ref sp, ref ip, module, out returnValue);
+        }
+        return table;
+    }
+
+    private static bool ExecuteOpcode(
+        VmOpcode op,
+        byte[] bc,
+        int[] tokens,
+        object[] args,
+        object[] locals,
+        object[] stack,
+        ref int sp,
+        ref int ip,
+        Module module,
+        out object returnValue)
+    {
+        returnValue = null;
+        switch (op)
+        {
+            case VmOpcode.Nop:
+                return false;
+            case VmOpcode.Dup:
+                stack[sp] = stack[sp - 1];
+                sp++;
+                return false;
+            case VmOpcode.Pop:
+                sp--;
+                return false;
+
+            case VmOpcode.LdcI4:
+                stack[sp++] = ReadI4(bc, ref ip);
+                return false;
+            case VmOpcode.LdcI8:
+                stack[sp++] = ReadI8(bc, ref ip);
+                return false;
+            case VmOpcode.LdcR4:
+                stack[sp++] = ReadR4(bc, ref ip);
+                return false;
+            case VmOpcode.LdcR8:
+                stack[sp++] = ReadR8(bc, ref ip);
+                return false;
+            case VmOpcode.LdcNull:
+                stack[sp++] = null;
+                return false;
+
+            case VmOpcode.Ldarg:
+                stack[sp++] = args[ReadI4(bc, ref ip)];
+                return false;
+            case VmOpcode.Starg:
+                args[ReadI4(bc, ref ip)] = stack[--sp];
+                return false;
+            case VmOpcode.Ldloc:
+                stack[sp++] = locals[ReadI4(bc, ref ip)];
+                return false;
+            case VmOpcode.Stloc:
+                locals[ReadI4(bc, ref ip)] = stack[--sp];
+                return false;
+
+            case VmOpcode.Add:
+                sp--;
+                stack[sp - 1] = Add(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.Sub:
+                sp--;
+                stack[sp - 1] = Sub(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.Mul:
+                sp--;
+                stack[sp - 1] = Mul(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.Div:
+                sp--;
+                stack[sp - 1] = Div(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.DivUn:
+                sp--;
+                stack[sp - 1] = DivUn(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.Rem:
+                sp--;
+                stack[sp - 1] = Rem(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.RemUn:
+                sp--;
+                stack[sp - 1] = RemUn(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.Neg:
+                stack[sp - 1] = Neg(stack[sp - 1]);
+                return false;
+            case VmOpcode.And:
+                sp--;
+                stack[sp - 1] = And(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.Or:
+                sp--;
+                stack[sp - 1] = Or(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.Xor:
+                sp--;
+                stack[sp - 1] = Xor(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.Not:
+                stack[sp - 1] = Not(stack[sp - 1]);
+                return false;
+            case VmOpcode.Shl:
+                sp--;
+                stack[sp - 1] = Shl(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.Shr:
+                sp--;
+                stack[sp - 1] = Shr(stack[sp - 1], stack[sp]);
+                return false;
+            case VmOpcode.ShrUn:
+                sp--;
+                stack[sp - 1] = ShrUn(stack[sp - 1], stack[sp]);
+                return false;
+
+            case VmOpcode.Ceq:
+                sp--;
+                stack[sp - 1] = object.Equals(stack[sp - 1], stack[sp]) ? 1 : 0;
+                return false;
+            case VmOpcode.Clt:
+                sp--;
+                stack[sp - 1] = Clt(stack[sp - 1], stack[sp]) ? 1 : 0;
+                return false;
+            case VmOpcode.CltUn:
+                sp--;
+                stack[sp - 1] = CltUn(stack[sp - 1], stack[sp]) ? 1 : 0;
+                return false;
+            case VmOpcode.Cgt:
+                sp--;
+                stack[sp - 1] = Cgt(stack[sp - 1], stack[sp]) ? 1 : 0;
+                return false;
+            case VmOpcode.CgtUn:
+                sp--;
+                stack[sp - 1] = CgtUn(stack[sp - 1], stack[sp]) ? 1 : 0;
+                return false;
+
+            case VmOpcode.Br:
+                ip = ReadI4(bc, ref ip);
+                return false;
+            case VmOpcode.Beq:
+                if (Equals(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
+                else ip += 4;
+                sp -= 2;
+                return false;
+            case VmOpcode.Bne:
+                if (!Equals(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
+                else ip += 4;
+                sp -= 2;
+                return false;
+            case VmOpcode.Brtrue:
+                if (IsTrue(stack[--sp])) ip = ReadI4(bc, ref ip);
+                else ip += 4;
+                return false;
+            case VmOpcode.Brfalse:
+                if (!IsTrue(stack[--sp])) ip = ReadI4(bc, ref ip);
+                else ip += 4;
+                return false;
+            case VmOpcode.Bge:
+                if (!Clt(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
+                else ip += 4;
+                sp -= 2;
+                return false;
+            case VmOpcode.Ble:
+                if (Clt(stack[sp - 2], stack[sp - 1]) || Equals(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
+                else ip += 4;
+                sp -= 2;
+                return false;
+            case VmOpcode.Blt:
+                if (Clt(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
+                else ip += 4;
+                sp -= 2;
+                return false;
+            case VmOpcode.Bgt:
+                if (Cgt(stack[sp - 2], stack[sp - 1])) ip = ReadI4(bc, ref ip);
+                else ip += 4;
+                sp -= 2;
+                return false;
+
+            case VmOpcode.Call:
+                var callTarget = module.ResolveMethod(ReadToken(bc, ref ip, tokens));
+                var callArgs = PopArgs(callTarget.GetParameters().Length, stack, ref sp);
+                stack[sp++] = callTarget.Invoke(null, callArgs);
+                return false;
+            case VmOpcode.Callvirt:
+                var virtTarget = module.ResolveMethod(ReadToken(bc, ref ip, tokens))!;
+                var virtParamCount = virtTarget.GetParameters().Length;
+                var virtArgs = PopArgs(virtParamCount + 1, stack, ref sp);
+                var virtThis = virtArgs[0];
+                var virtArgArr = new object[virtParamCount];
+                Array.Copy(virtArgs, 1, virtArgArr, 0, virtParamCount);
+                stack[sp++] = virtTarget.Invoke(virtThis, virtArgArr);
+                return false;
+            case VmOpcode.Newobj:
+                var ctor = module.ResolveMethod(ReadToken(bc, ref ip, tokens))!;
+                var ctorParamCount = ctor.GetParameters().Length;
+                var ctorArgs = PopArgs(ctorParamCount, stack, ref sp);
+                stack[sp++] = Activator.CreateInstance(ctor.DeclaringType!, ctorArgs);
+                return false;
+
+            case VmOpcode.Ldfld:
+                var ldfld = module.ResolveField(ReadToken(bc, ref ip, tokens))!;
+                var ldfldObj = stack[--sp];
+                stack[sp++] = ldfld.GetValue(ldfldObj);
+                return false;
+            case VmOpcode.Stfld:
+                var stfld = module.ResolveField(ReadToken(bc, ref ip, tokens))!;
+                var stfldVal = stack[--sp];
+                var stfldObj = stack[--sp];
+                stfld.SetValue(stfldObj, stfldVal);
+                return false;
+            case VmOpcode.Ldsfld:
+                var ldsfld = module.ResolveField(ReadToken(bc, ref ip, tokens))!;
+                stack[sp++] = ldsfld.GetValue(null);
+                return false;
+            case VmOpcode.Stsfld:
+                var stsfld = module.ResolveField(ReadToken(bc, ref ip, tokens))!;
+                stsfld.SetValue(null, stack[--sp]);
+                return false;
+
+            case VmOpcode.Newarr:
+                var arrLen = Convert.ToInt32(stack[--sp]);
+                var arrElemToken = ReadToken(bc, ref ip, tokens);
+                var arrElemType = arrElemToken != 0 ? module.ResolveType(arrElemToken) : typeof(object);
+                stack[sp++] = Array.CreateInstance(arrElemType, arrLen);
+                return false;
+            case VmOpcode.Ldelem:
+                var idx = Convert.ToInt32(stack[--sp]);
+                var arr = stack[--sp];
+                stack[sp++] = ((Array)arr!).GetValue(idx);
+                return false;
+            case VmOpcode.Stelem:
+                var stelemVal = stack[--sp];
+                var stelemIdx = Convert.ToInt32(stack[--sp]);
+                var stelemArr = stack[--sp];
+                ((Array)stelemArr!).SetValue(stelemVal, stelemIdx);
+                return false;
+            case VmOpcode.Ldlen:
+                stack[sp - 1] = ((Array)stack[sp - 1]!).Length;
+                return false;
+
+            case VmOpcode.Box:
+                var boxType = module.ResolveType(ReadToken(bc, ref ip, tokens));
+                stack[sp - 1] = stack[sp - 1] == null ? null : Convert.ChangeType(stack[sp - 1], boxType);
+                return false;
+            case VmOpcode.Unbox:
+                var unboxType = module.ResolveType(ReadToken(bc, ref ip, tokens));
+                var unboxVal = stack[--sp];
+                stack[sp++] = unboxVal == null ? null : Convert.ChangeType(unboxVal, unboxType);
+                return false;
+            case VmOpcode.Castclass:
+                var castType = module.ResolveType(ReadToken(bc, ref ip, tokens));
+                stack[sp - 1] = stack[sp - 1] == null ? null : Convert.ChangeType(stack[sp - 1], castType);
+                return false;
+            case VmOpcode.Isinst:
+                var isinstType = module.ResolveType(ReadToken(bc, ref ip, tokens));
+                var isinstVal = stack[sp - 1];
+                stack[sp - 1] = isinstVal != null && isinstType.IsInstanceOfType(isinstVal) ? isinstVal : null;
+                return false;
+
+            case VmOpcode.Ret:
+                returnValue = sp > 0 ? stack[sp - 1] : null;
+                return true;
+            default:
+                throw new InvalidProgramException($"Unknown VM opcode: {op}");
+        }
+    }
+
+    private static byte GetDispatchEngine(byte[] dispatchSchedule, int ip)
+    {
+        if (dispatchSchedule == null || dispatchSchedule.Length == 0)
+            return 0;
+        var segment = (ip >> 4) % dispatchSchedule.Length;
+        return dispatchSchedule[segment];
+    }
+
+    private static byte[] BuildRandomDispatchMap()
+    {
+        var map = new byte[256];
+        for (var i = 0; i < map.Length; i++)
+            map[i] = (byte)i;
+        var seed = unchecked(Environment.TickCount ^ Guid.NewGuid().GetHashCode());
+        var rng = new Random(seed);
+        for (var i = map.Length - 1; i > 0; i--)
+        {
+            var j = rng.Next(i + 1);
+            var t = map[i];
+            map[i] = map[j];
+            map[j] = t;
+        }
+        return map;
+    }
+
+    private static byte[] InvertMap(byte[] map)
+    {
+        var inv = new byte[256];
+        for (var i = 0; i < map.Length; i++)
+            inv[map[i]] = (byte)i;
+        return inv;
     }
 
     private static int ReadI4(byte[] bc, ref int ip)

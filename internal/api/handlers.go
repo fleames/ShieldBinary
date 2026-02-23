@@ -21,6 +21,27 @@ import (
 const maxUploadSize = 100 << 20 // 100 MB
 
 var validTiers = map[string]bool{"minimal": true, "basic": true, "pro": true, "enterprise": true}
+var validProtections = map[string]bool{
+	"resource_encryption":        true,
+	"reference_proxy":            true,
+	"delegate_proxy":             true,
+	"reflection_dispatch":        true,
+	"type_scramble":              true,
+	"assembly_embed":             true,
+	"anti_decompiler":            true,
+	"anti_decompiler_aggressive": true,
+	"invalid_metadata":           true,
+	"method_body_encryption":     true,
+	"dynamic_method_generation":  true,
+	"runtime_rasp":               true,
+	"local_var_promotion":        true,
+	"il_mutation":                true,
+	"rename_mode_random":         true,
+	"rename_mode_sequential":     true,
+	"rename_mode_unicode":        true,
+	"rename_mode_unprintable":    true,
+	"polymorphic_mode":           true,
+}
 
 func (s *Server) handleRegister(c *gin.Context) {
 	if s.authStore == nil {
@@ -184,7 +205,7 @@ func (s *Server) handleUpload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"input_key": key,
 		"filename":  file.Filename,
-		"size":     file.Size,
+		"size":      file.Size,
 	})
 }
 
@@ -226,6 +247,7 @@ func (s *Server) handleCreateJob(c *gin.Context) {
 		Tier        string   `json:"tier" binding:"required"`
 		BinaryType  string   `json:"binary_type"`
 		LowEntropy  bool     `json:"low_entropy"`
+		Polymorphic bool     `json:"polymorphic_mode"`
 		Protections []string `json:"protections,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -240,6 +262,7 @@ func (s *Server) handleCreateJob(c *gin.Context) {
 	if req.BinaryType == "" {
 		req.BinaryType = "auto"
 	}
+	req.Protections = sanitizeProtections(req.Protections)
 
 	userID, _ := c.Get("user_id")
 	userIDStr, _ := userID.(string)
@@ -268,6 +291,7 @@ func (s *Server) handleCreateJob(c *gin.Context) {
 		Tier:        tier,
 		BinaryType:  req.BinaryType,
 		LowEntropy:  req.LowEntropy,
+		Polymorphic: req.Polymorphic,
 		Protections: req.Protections,
 	}
 
@@ -324,14 +348,17 @@ func (s *Server) handleListJobs(c *gin.Context) {
 			continue
 		}
 		jobs = append(jobs, gin.H{
-			"job_id":      job.ID,
-			"status":      job.Status,
-			"progress":    job.Progress,
-			"tier":        job.Tier,
-			"binary_type": job.BinaryType,
-			"input_key":   job.InputKey,
-			"output_key":  job.OutputKey,
-			"error":       job.Error,
+			"job_id":           job.ID,
+			"status":           job.Status,
+			"progress":         job.Progress,
+			"tier":             job.Tier,
+			"binary_type":      job.BinaryType,
+			"low_entropy":      job.LowEntropy,
+			"polymorphic_mode": job.Polymorphic,
+			"protections":      job.Protections,
+			"input_key":        job.InputKey,
+			"output_key":       job.OutputKey,
+			"error":            job.Error,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"jobs": jobs})
@@ -366,15 +393,35 @@ func (s *Server) handleGetJob(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"job_id":      job.ID,
-		"status":      job.Status,
-		"progress":    job.Progress,
-		"tier":        job.Tier,
-		"binary_type": job.BinaryType,
-		"input_key":   job.InputKey,
-		"output_key":  job.OutputKey,
-		"error":       job.Error,
+		"job_id":           job.ID,
+		"status":           job.Status,
+		"progress":         job.Progress,
+		"tier":             job.Tier,
+		"binary_type":      job.BinaryType,
+		"low_entropy":      job.LowEntropy,
+		"polymorphic_mode": job.Polymorphic,
+		"protections":      job.Protections,
+		"input_key":        job.InputKey,
+		"output_key":       job.OutputKey,
+		"error":            job.Error,
 	})
+}
+
+func sanitizeProtections(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		k := strings.ToLower(strings.TrimSpace(p))
+		if k == "" || !validProtections[k] || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	return out
 }
 
 // handleDeleteJob removes a job and its storage artifacts.

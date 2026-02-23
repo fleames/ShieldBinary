@@ -17,11 +17,11 @@ internal sealed class ILToVmCompiler
     private readonly List<(int pos, Instruction target, VmOpcode branchOp)> _patches = new();
     private readonly Dictionary<Instruction, int> _switchTargets = new(); // Switch: multiple targets
 
-    public ILToVmCompiler(MethodDef method)
+    public ILToVmCompiler(MethodDef method, byte[]? opcodeEncodeMap = null)
     {
         _method = method;
         _module = method.Module;
-        _writer = new VmWriter();
+        _writer = new VmWriter(opcodeEncodeMap);
     }
 
     public bool TryCompile(out byte[] bytecode, out object[] tokenTable)

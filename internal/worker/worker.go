@@ -136,7 +136,7 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 	detectedType := "native"
 	if isDotNet {
 		// Run .NET engine
-		if err := w.runDotNetEngine(ctx, job.ID, workDir, inputPath, outputPath, job.Tier, job.LowEntropy); err != nil {
+		if err := w.runDotNetEngine(ctx, job.ID, workDir, inputPath, outputPath, job.Tier, job.LowEntropy, job.Polymorphic, job.Protections); err != nil {
 			// Engine may reject mixed/edge-case PEs; fall back to native packer
 			if strings.Contains(err.Error(), "not a .NET assembly") && runtime.GOOS == "windows" {
 				if valid, ve := peutil.IsValidPE(inputPath); ve == nil && valid {
@@ -200,7 +200,7 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 	w.logger.Info("job completed", zap.String("job_id", job.ID))
 }
 
-func (w *Worker) runDotNetEngine(ctx context.Context, jobID, workDir, inputPath, outputPath, tier string, lowEntropy bool) error {
+func (w *Worker) runDotNetEngine(ctx context.Context, jobID, workDir, inputPath, outputPath, tier string, lowEntropy bool, polymorphic bool, protections []string) error {
 	enginePath := w.cfg.EnginePath
 	var useDotnet bool
 	if enginePath == "" {
@@ -243,6 +243,10 @@ func (w *Worker) runDotNetEngine(ctx context.Context, jobID, workDir, inputPath,
 	if w.cfg.EngineLowEntropy || lowEntropy {
 		envAdd = append(envAdd, "SHIELD_ENGINE_LOW_ENTROPY=1")
 	}
+	if polymorphic {
+		envAdd = append(envAdd, "SHIELD_ENGINE_POLYMORPHIC=1")
+	}
+	envAdd = append(envAdd, protectionEnvVars(protections)...)
 	if len(envAdd) > 0 {
 		cmd.Env = append(append([]string{}, os.Environ()...), envAdd...)
 	}
@@ -256,6 +260,78 @@ func (w *Worker) runDotNetEngine(ctx context.Context, jobID, workDir, inputPath,
 		return fmt.Errorf("%s", msg)
 	}
 	return nil
+}
+
+func protectionEnvVars(protections []string) []string {
+	if len(protections) == 0 {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, p := range protections {
+		k := strings.ToLower(strings.TrimSpace(p))
+		if k != "" {
+			set[k] = true
+		}
+	}
+	var env []string
+	if set["resource_encryption"] {
+		env = append(env, "SHIELD_ENGINE_RESOURCE_ENCRYPT=1")
+	}
+	if set["reference_proxy"] {
+		env = append(env, "SHIELD_ENGINE_REFERENCE_PROXY=1")
+	}
+	if set["delegate_proxy"] {
+		env = append(env, "SHIELD_ENGINE_DELEGATE_PROXY=1")
+	}
+	if set["reflection_dispatch"] {
+		env = append(env, "SHIELD_ENGINE_REFLECTION_DISPATCH=1")
+	}
+	if set["il_mutation"] {
+		env = append(env, "SHIELD_ENGINE_IL_MUTATION=1")
+	}
+	if set["type_scramble"] {
+		env = append(env, "SHIELD_ENGINE_TYPE_SCRAMBLE=1")
+	}
+	if set["assembly_embed"] {
+		env = append(env, "SHIELD_ENGINE_ASSEMBLY_EMBED=1")
+	}
+	if set["anti_decompiler"] || set["anti_decompiler_aggressive"] {
+		env = append(env, "SHIELD_ENGINE_ANTI_DECOMPILER=1")
+	}
+	if set["anti_decompiler_aggressive"] {
+		env = append(env, "SHIELD_ENGINE_ANTI_DECOMPILER_AGGRESSIVE=1")
+	}
+	if set["invalid_metadata"] {
+		env = append(env, "SHIELD_ENGINE_INVALID_METADATA=1")
+	}
+	if set["method_body_encryption"] {
+		env = append(env, "SHIELD_ENGINE_METHOD_BODY_ENCRYPT=1")
+	}
+	if set["dynamic_method_generation"] {
+		env = append(env, "SHIELD_ENGINE_DYNAMIC_METHOD_GEN=1")
+	}
+	if set["runtime_rasp"] {
+		env = append(env, "SHIELD_ENGINE_RASP=1")
+	}
+	if set["local_var_promotion"] {
+		env = append(env, "SHIELD_ENGINE_LOCAL_VAR_PROMOTION=1")
+	}
+	if set["rename_mode_sequential"] {
+		env = append(env, "SHIELD_ENGINE_RENAME_MODE=sequential")
+	}
+	if set["rename_mode_unicode"] {
+		env = append(env, "SHIELD_ENGINE_RENAME_MODE=unicode")
+	}
+	if set["rename_mode_unprintable"] {
+		env = append(env, "SHIELD_ENGINE_RENAME_MODE=unprintable", "SHIELD_ENGINE_RENAME_UNSAFE=1")
+	}
+	if set["rename_mode_random"] {
+		env = append(env, "SHIELD_ENGINE_RENAME_MODE=random")
+	}
+	if set["polymorphic_mode"] {
+		env = append(env, "SHIELD_ENGINE_POLYMORPHIC=1")
+	}
+	return env
 }
 
 func (w *Worker) runNativePacker(ctx context.Context, jobID, inputPath, outputPath, tier string) error {

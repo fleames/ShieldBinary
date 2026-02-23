@@ -111,6 +111,49 @@ dotnet publish -c Release -r linux-x64 --self-contained -o ../bin/engine
 
 Set `SHIELD_ENGINE_PATH` to the engine executable path.
 
+### .NET publish hardening profiles (R2R / Single-file / Trimming / NativeAOT)
+
+Use the profile script to produce deployment variants for compatibility/perf/hardening evaluation:
+
+```powershell
+# Windows
+.\scripts\publish-dotnet-profiles.ps1 -Project .\testdata\dotnet-fixture\TestApp.csproj -Runtime win-x64 -OutputDir .\bin\publish-profiles
+```
+
+```bash
+# Linux/macOS
+./scripts/publish-dotnet-profiles.sh ./testdata/dotnet-fixture/TestApp.csproj linux-x64 Release ./bin/publish-profiles
+```
+
+Profiles produced:
+- `baseline`
+- `r2r` (`PublishReadyToRun=true`)
+- `singlefile` (`PublishSingleFile=true`)
+- `trimmed` (`PublishTrimmed=true`)
+- `singlefile-r2r-trimmed` (combined)
+- `nativeaot` (best-effort; may be skipped for incompatible apps)
+
+Smoke validation (optional, slower):
+```bash
+SHIELD_RUN_PUBLISH_PROFILE_TESTS=1 go test -v ./internal/integration -run TestDotNetPublishProfiles_Smoke -count=1
+```
+
+### Assembly merging (ILRepack)
+
+You can merge managed assemblies into a single merged DLL as a packaging hardening step:
+
+```powershell
+.\scripts\merge-assemblies.ps1 -Output .\bin\merged\app.merged.dll -Input .\bin\publish\App.dll,.\bin\publish\Dep.dll
+```
+
+```bash
+./scripts/merge-assemblies.sh ./bin/merged/app.merged.dll ./bin/publish/App.dll ./bin/publish/Dep.dll
+```
+
+Notes:
+- Uses local `dotnet` tool manifest and installs `dotnet-ilrepack` automatically if missing.
+- Merge is most reliable for managed dependencies with compatible target frameworks.
+
 ### .NET apps: "application to execute does not exist"
 
 Framework-dependent .NET apps (e.g. `MyApp.exe` + `MyApp.dll`) need all files together. The native packer protects the exe; the loader extracts and runs it from the **same folder as the loader**. So:
@@ -165,7 +208,28 @@ $env:SHIELD_ENGINE_SAFE = "1"
 bin/protect.exe myapp.dll out.dll basic
 ```
 
-Pass names: `symbol_stripping`, `anti_ildasm`, `name_obfuscation`, `string_encryption`, `constant_encoding`, `opaque_predicates`, `anti_debug`, `anti_tamper`, `control_flow_flattening`, `dead_code_insertion`, `virtualization`, `metadata_cleanup`.
+Pass names: `symbol_stripping`, `anti_ildasm`, `name_obfuscation`, `string_encryption`, `resource_encryption`, `reference_proxy`, `delegate_proxy`, `reflection_dispatch`, `type_scramble`, `assembly_embed`, `anti_decompiler`, `invalid_metadata`, `method_body_encryption`, `dynamic_method_generation`, `constant_encoding`, `il_mutation`, `opaque_predicates`, `anti_debug`, `anti_tamper`, `control_flow_flattening`, `dead_code_insertion`, `virtualization`, `metadata_cleanup`.
+
+Advanced opt-in passes (off by default):
+- `resource_encryption` (set `SHIELD_ENGINE_RESOURCE_ENCRYPT=1`)
+- `reference_proxy` (set `SHIELD_ENGINE_REFERENCE_PROXY=1`)
+- `delegate_proxy` (set `SHIELD_ENGINE_DELEGATE_PROXY=1`)
+- `reflection_dispatch` (set `SHIELD_ENGINE_REFLECTION_DISPATCH=1`)
+- `il_mutation` (set `SHIELD_ENGINE_IL_MUTATION=1`)
+- `type_scramble` (set `SHIELD_ENGINE_TYPE_SCRAMBLE=1`)
+- `assembly_embed` (set `SHIELD_ENGINE_ASSEMBLY_EMBED=1`)
+- `anti_decompiler` (set `SHIELD_ENGINE_ANTI_DECOMPILER=1`)
+- `invalid_metadata` (set `SHIELD_ENGINE_INVALID_METADATA=1`)
+- `method_body_encryption` (set `SHIELD_ENGINE_METHOD_BODY_ENCRYPT=1`)
+- `dynamic_method_generation` (set `SHIELD_ENGINE_DYNAMIC_METHOD_GEN=1`)
+- `runtime_rasp` (set `SHIELD_ENGINE_RASP=1` for runtime anti-debug/sandbox and method-integrity checks)
+- `local_var_promotion` (set `SHIELD_ENGINE_LOCAL_VAR_PROMOTION=1` to rewrite selected locals into heap-backed state bag)
+- `polymorphic_mode` (set `SHIELD_ENGINE_POLYMORPHIC=1` for higher-variance mutation templates per build)
+- aggressive anti-decompiler mode: `SHIELD_ENGINE_ANTI_DECOMPILER_AGGRESSIVE=1` (use only with compatibility testing)
+
+Name obfuscation rename modes:
+- `SHIELD_ENGINE_RENAME_MODE=random|sequential|unicode|unprintable`
+- `SHIELD_ENGINE_RENAME_UNSAFE=1` is required for `unprintable` mode.
 
 ## Project layout
 
@@ -202,6 +266,8 @@ Enterprise tier includes **code virtualization** by default: method IL is compil
 ### Lower output entropy
 
 High-entropy binaries can trigger AV heuristics. Set `engine_low_entropy: true` or `SHIELD_ENGINE_LOW_ENTROPY=1` to use deterministic encoding: deterministic per-string/per-constant derivation and stable helper-type names. Protection remains effective; output entropy is reduced.
+
+Polymorphic mode (`SHIELD_ENGINE_POLYMORPHIC=1`) is the opposite tuning: it increases build-to-build variation by using higher-variance IL mutation/dead-code/predicate templates. It is automatically suppressed when low entropy mode is enabled.
 
 ### Pro tier stability
 

@@ -39,6 +39,9 @@ public static class Program
             var options = JsonSerializer.Deserialize<EngineOptions>(optionsJson) ?? new EngineOptions();
             var onlyPasses = Environment.GetEnvironmentVariable("SHIELD_ENGINE_PASSES"); // e.g. "symbol_stripping,name_obfuscation"
             var lowEntropy = string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_LOW_ENTROPY"), "1", StringComparison.OrdinalIgnoreCase);
+            var requestedPolymorphic = options.PolymorphicMode ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_POLYMORPHIC"), "1", StringComparison.OrdinalIgnoreCase);
+            var polymorphicMode = requestedPolymorphic && !lowEntropy;
             var renameMode = ResolveRenameMode(options.RenameMode, Environment.GetEnvironmentVariable("SHIELD_ENGINE_RENAME_MODE"));
             var allowUnsafeRename = options.AllowUnsafeRename ||
                 string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_RENAME_UNSAFE"), "1", StringComparison.OrdinalIgnoreCase);
@@ -48,17 +51,51 @@ public static class Program
                 string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_REFERENCE_PROXY"), "1", StringComparison.OrdinalIgnoreCase);
             var enableIlMutation = options.IlMutation ||
                 string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_IL_MUTATION"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableDelegateProxy = options.DelegateProxy ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_DELEGATE_PROXY"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableReflectionDispatch = options.ReflectionDispatch ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_REFLECTION_DISPATCH"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableTypeScramble = options.TypeScramble ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_TYPE_SCRAMBLE"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableAssemblyEmbed = options.AssemblyEmbed ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_ASSEMBLY_EMBED"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableAntiDecompiler = options.AntiDecompiler ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_ANTI_DECOMPILER"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableInvalidMetadata = options.InvalidMetadata ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_INVALID_METADATA"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableMethodBodyEncryption = options.MethodBodyEncryption ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_METHOD_BODY_ENCRYPT"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableDynamicMethodGen = options.DynamicMethodGen ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_DYNAMIC_METHOD_GEN"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableAntiDecompilerAggressive = options.AntiDecompilerAggressive ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_ANTI_DECOMPILER_AGGRESSIVE"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableRuntimeRasp = options.RuntimeRasp ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_RASP"), "1", StringComparison.OrdinalIgnoreCase);
+            var enableLocalVarPromotion = options.LocalVariablePromotion ||
+                string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_LOCAL_VAR_PROMOTION"), "1", StringComparison.OrdinalIgnoreCase);
             var ctx = new PipelineContext(
                 inputPath,
                 outputPath,
                 tier,
                 options,
                 lowEntropy,
+                polymorphicMode,
                 renameMode,
                 allowUnsafeRename,
                 enableResourceEncryption,
                 enableReferenceProxy,
-                enableIlMutation) { OnlyPasses = onlyPasses };
+                enableIlMutation,
+                enableDelegateProxy,
+                enableReflectionDispatch,
+                enableTypeScramble,
+                enableAssemblyEmbed,
+                enableAntiDecompiler,
+                enableInvalidMetadata,
+                enableMethodBodyEncryption,
+                enableDynamicMethodGen,
+                enableAntiDecompilerAggressive,
+                enableRuntimeRasp,
+                enableLocalVarPromotion) { OnlyPasses = onlyPasses };
             RunPipeline(ctx);
             return 0;
         }
@@ -114,6 +151,10 @@ public static class Program
         var verbose = string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_VERBOSE"), "1", StringComparison.OrdinalIgnoreCase);
         if (verbose) Console.Error.WriteLine($"[engine] Loading {ctx.InputPath}");
         if (ctx.LowEntropy && verbose) Console.Error.WriteLine("[engine] SHIELD_ENGINE_LOW_ENTROPY=1: using deterministic encoding to reduce output entropy");
+        if (ctx.PolymorphicMode && verbose) Console.Error.WriteLine("[engine] SHIELD_ENGINE_POLYMORPHIC=1: enabling high-variance mutation templates");
+        var polymorphicRequested = ctx.Options.PolymorphicMode ||
+            string.Equals(Environment.GetEnvironmentVariable("SHIELD_ENGINE_POLYMORPHIC"), "1", StringComparison.OrdinalIgnoreCase);
+        if (polymorphicRequested && ctx.LowEntropy && verbose) Console.Error.WriteLine("[engine] polymorphic_mode requested but disabled because low entropy mode is active");
 
         using var module = ModuleDefMD.Load(ctx.InputPath);
         var typeCount = module.GetAllTypes().Count();
@@ -199,6 +240,16 @@ public static class Program
             new StringEncryptionPass(),
             new ResourceEncryptionPass(),
             new ReferenceProxyPass(),
+            new DelegateProxyPass(),
+            new ReflectionDispatchPass(),
+            new TypeScramblePass(),
+            new AssemblyEmbedPass(),
+            new AntiDecompilerPass(),
+            new InvalidMetadataPass(),
+            new MethodBodyEncryptionPass(),
+            new DynamicMethodGenerationPass(),
+            new RuntimeSelfProtectionPass(),
+            new LocalVariablePromotionPass(),
             new ConstantEncodingPass(),
             new IlMutationPass(),
             new OpaquePredicatesPass(),
@@ -213,6 +264,16 @@ public static class Program
             new StringEncryptionPass(),
             new ResourceEncryptionPass(),
             new ReferenceProxyPass(),
+            new DelegateProxyPass(),
+            new ReflectionDispatchPass(),
+            new TypeScramblePass(),
+            new AssemblyEmbedPass(),
+            new AntiDecompilerPass(),
+            new InvalidMetadataPass(),
+            new MethodBodyEncryptionPass(),
+            new DynamicMethodGenerationPass(),
+            new RuntimeSelfProtectionPass(),
+            new LocalVariablePromotionPass(),
             new ConstantEncodingPass(),
             new IlMutationPass(),
             new OpaquePredicatesPass(),
@@ -246,11 +307,23 @@ public record EngineOptions
 {
     public bool Deterministic { get; init; }
     public string[]? Protections { get; init; }
+    public bool PolymorphicMode { get; init; } // High-variance transform templates for each build
     public string? RenameMode { get; init; } // random | sequential | unicode | unprintable
     public bool AllowUnsafeRename { get; init; } // required for unprintable mode
     public bool EncryptResources { get; init; } // false by default, opt-in via options/env
     public bool ReferenceProxy { get; init; } // false by default, opt-in via options/env
     public bool IlMutation { get; init; } // false by default, opt-in via options/env
+    public bool DelegateProxy { get; init; } // false by default, opt-in via options/env
+    public bool ReflectionDispatch { get; init; } // false by default, opt-in via options/env
+    public bool TypeScramble { get; init; } // false by default, opt-in via options/env
+    public bool AssemblyEmbed { get; init; } // false by default, opt-in via options/env
+    public bool AntiDecompiler { get; init; } // false by default, opt-in via options/env
+    public bool InvalidMetadata { get; init; } // false by default, opt-in via options/env
+    public bool MethodBodyEncryption { get; init; } // false by default, opt-in via options/env
+    public bool DynamicMethodGen { get; init; } // false by default, opt-in via options/env
+    public bool AntiDecompilerAggressive { get; init; } // false by default, opt-in via options/env
+    public bool RuntimeRasp { get; init; } // false by default, opt-in via options/env (enterprise default behavior in pass)
+    public bool LocalVariablePromotion { get; init; } // false by default, opt-in via options/env
 }
 
 public class PipelineContext
@@ -262,11 +335,23 @@ public class PipelineContext
     public Random Random { get; }
     public string? OnlyPasses { get; init; } // Comma-separated pass names for debugging (null = run all)
     public bool LowEntropy { get; }    // When true: deterministic per-string/per-constant derivation to reduce output entropy
+    public bool PolymorphicMode { get; } // Enables extra randomization and template diversity
     public RenameMode RenameMode { get; }
     public bool AllowUnsafeRename { get; }
     public bool EnableResourceEncryption { get; }
     public bool EnableReferenceProxy { get; }
     public bool EnableIlMutation { get; }
+    public bool EnableDelegateProxy { get; }
+    public bool EnableReflectionDispatch { get; }
+    public bool EnableTypeScramble { get; }
+    public bool EnableAssemblyEmbed { get; }
+    public bool EnableAntiDecompiler { get; }
+    public bool EnableInvalidMetadata { get; }
+    public bool EnableMethodBodyEncryption { get; }
+    public bool EnableDynamicMethodGen { get; }
+    public bool EnableAntiDecompilerAggressive { get; }
+    public bool EnableRuntimeRasp { get; }
+    public bool EnableLocalVarPromotion { get; }
 
     public PipelineContext(
         string inputPath,
@@ -274,22 +359,46 @@ public class PipelineContext
         string tier,
         EngineOptions options,
         bool lowEntropy = false,
+        bool polymorphicMode = false,
         RenameMode renameMode = RenameMode.Random,
         bool allowUnsafeRename = false,
         bool enableResourceEncryption = false,
         bool enableReferenceProxy = false,
-        bool enableIlMutation = false)
+        bool enableIlMutation = false,
+        bool enableDelegateProxy = false,
+        bool enableReflectionDispatch = false,
+        bool enableTypeScramble = false,
+        bool enableAssemblyEmbed = false,
+        bool enableAntiDecompiler = false,
+        bool enableInvalidMetadata = false,
+        bool enableMethodBodyEncryption = false,
+        bool enableDynamicMethodGen = false,
+        bool enableAntiDecompilerAggressive = false,
+        bool enableRuntimeRasp = false,
+        bool enableLocalVarPromotion = false)
     {
         InputPath = inputPath;
         OutputPath = outputPath;
         Tier = tier;
         Options = options;
         LowEntropy = lowEntropy;
+        PolymorphicMode = polymorphicMode && !lowEntropy;
         RenameMode = renameMode;
         AllowUnsafeRename = allowUnsafeRename;
         EnableResourceEncryption = enableResourceEncryption;
         EnableReferenceProxy = enableReferenceProxy;
         EnableIlMutation = enableIlMutation;
+        EnableDelegateProxy = enableDelegateProxy;
+        EnableReflectionDispatch = enableReflectionDispatch;
+        EnableTypeScramble = enableTypeScramble;
+        EnableAssemblyEmbed = enableAssemblyEmbed;
+        EnableAntiDecompiler = enableAntiDecompiler;
+        EnableInvalidMetadata = enableInvalidMetadata;
+        EnableMethodBodyEncryption = enableMethodBodyEncryption;
+        EnableDynamicMethodGen = enableDynamicMethodGen;
+        EnableAntiDecompilerAggressive = enableAntiDecompilerAggressive;
+        EnableRuntimeRasp = enableRuntimeRasp;
+        EnableLocalVarPromotion = enableLocalVarPromotion;
         Random = options.Deterministic || lowEntropy
             ? new Random(42)
             : new Random(unchecked((int)((uint)Guid.NewGuid().GetHashCode() ^ (uint)Environment.TickCount64 ^ (uint)Environment.ProcessId))); // Multiple entropy sources so each run differs when LowEntropy=false

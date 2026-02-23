@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Scan from './pages/Scan';
+import Tiers from './pages/Tiers';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -41,6 +42,14 @@ function App() {
             element={
               <RequireAuth>
                 <Scan />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="tiers"
+            element={
+              <RequireAuth>
+                <Tiers />
               </RequireAuth>
             }
           />

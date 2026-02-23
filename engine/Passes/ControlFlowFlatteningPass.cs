@@ -70,6 +70,15 @@ public sealed class ControlFlowFlatteningPass : IProtectionPass
         var targets = new List<Instruction>();
         var newIns = new List<Instruction>();
 
+        if (ctx.PolymorphicMode)
+        {
+            // Obfuscated zero-init for dispatcher state to vary emitted IL shape.
+            var mask = ctx.Random.Next(1, int.MaxValue);
+            newIns.Add(Instruction.Create(OpCodes.Ldc_I4, mask));
+            newIns.Add(Instruction.Create(OpCodes.Ldc_I4, mask));
+            newIns.Add(Instruction.Create(OpCodes.Xor));
+            newIns.Add(Instruction.Create(OpCodes.Stloc, stateVar));
+        }
         newIns.Add(Instruction.Create(OpCodes.Br, dispatcher));
 
         for (var i = 0; i < blocks.Count; i++)

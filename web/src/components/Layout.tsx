@@ -58,6 +58,18 @@ export default function Layout({ children, hideUser }: LayoutProps) {
               Scan
             </Link>
           )}
+          {showUser && (
+            <Link
+              to="/tiers"
+              style={{
+                fontSize: '0.875rem',
+                color: location.pathname === '/tiers' ? 'var(--accent)' : 'var(--text-muted)',
+                textDecoration: 'none',
+              }}
+            >
+              Tiers
+            </Link>
+          )}
           <a
             href="/api/v1/docs"
             target="_blank"

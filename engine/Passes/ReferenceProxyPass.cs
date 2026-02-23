@@ -49,8 +49,6 @@ public sealed class ReferenceProxyPass : IProtectionPass
                 continue;
             if (!IsEligibleTarget(target))
                 continue;
-            if (ins.Operand is MethodSpec)
-                continue; // generic method instantiations are deferred for compatibility
 
             if (isCallVirt && !IsEligibleVirtualTarget(target))
                 continue;
@@ -78,6 +76,13 @@ public sealed class ReferenceProxyPass : IProtectionPass
             return false;
         if (sig.Generic)
             return false;
+        if (ContainsGenericPlaceholders(sig.RetType))
+            return false;
+        foreach (var p in sig.Params)
+        {
+            if (ContainsGenericPlaceholders(p))
+                return false;
+        }
         return true;
     }
 
@@ -99,6 +104,13 @@ public sealed class ReferenceProxyPass : IProtectionPass
             return null;
         if (targetSig.Generic)
             return null;
+        if (ContainsGenericPlaceholders(targetSig.RetType))
+            return null;
+        foreach (var p in targetSig.Params)
+        {
+            if (ContainsGenericPlaceholders(p))
+                return null;
+        }
 
         var paramTypes = new List<TypeSig>();
         if (targetSig.HasThis)
@@ -127,6 +139,23 @@ public sealed class ReferenceProxyPass : IProtectionPass
         body.Instructions.Add(Instruction.Create(useCallVirt ? OpCodes.Callvirt : OpCodes.Call, targetRef));
         body.Instructions.Add(Instruction.Create(OpCodes.Ret));
         return proxyMethod;
+    }
+
+    private static bool ContainsGenericPlaceholders(TypeSig t)
+    {
+        if (t == null)
+            return false;
+        if (t.ElementType == ElementType.Var || t.ElementType == ElementType.MVar)
+            return true;
+        if (t.Next != null && ContainsGenericPlaceholders(t.Next))
+            return true;
+        if (t is GenericInstSig gi)
+        {
+            foreach (var a in gi.GenericArguments)
+                if (ContainsGenericPlaceholders(a))
+                    return true;
+        }
+        return false;
     }
 
     private static Instruction CreateLdarg(MethodDef method, int index)

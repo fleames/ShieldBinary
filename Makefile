@@ -1,7 +1,7 @@
 # ShieldBinary — Build and run
 # Prerequisites: Go 1.22+, .NET 8 SDK, Node 20+, Redis
 
-.PHONY: build build-engine build-loader test test-integration run run-docker prereqs
+.PHONY: build build-engine build-loader publish-profiles publish-profiles-win publish-profiles-linux merge-assemblies merge-assemblies-win test test-integration run run-docker prereqs
 
 build:
 	go build ./...
@@ -13,6 +13,27 @@ build-engine:
 # Build native PE loader (Windows only, for native .exe packing)
 build-loader:
 	go build -ldflags "-s -w" -o bin/loader.exe ./cmd/loader
+
+# Publish .NET deployment hardening profiles (baseline/r2r/single-file/trim/nativeaot best-effort)
+# PROJECT defaults to test fixture; override with your app .csproj
+publish-profiles:
+	./scripts/publish-dotnet-profiles.sh $(or $(PROJECT),./testdata/dotnet-fixture/TestApp.csproj) $(or $(RID),linux-x64) Release ./bin/publish-profiles
+
+publish-profiles-win:
+	powershell -ExecutionPolicy Bypass -File .\scripts\publish-dotnet-profiles.ps1 -Project $(or $(PROJECT),.\testdata\dotnet-fixture\TestApp.csproj) -Runtime $(or $(RID),win-x64) -OutputDir .\bin\publish-profiles
+
+publish-profiles-linux:
+	./scripts/publish-dotnet-profiles.sh $(or $(PROJECT),./testdata/dotnet-fixture/TestApp.csproj) $(or $(RID),linux-x64) Release ./bin/publish-profiles
+
+# Merge managed assemblies with ILRepack (requires local dotnet tool)
+# OUTPUT defaults to ./bin/merged/app.merged.dll
+# INPUTS must include at least two assemblies, e.g.:
+# make merge-assemblies OUTPUT=./bin/merged/app.dll INPUTS="./bin/publish/App.dll ./bin/publish/Dep.dll"
+merge-assemblies:
+	./scripts/merge-assemblies.sh $(or $(OUTPUT),./bin/merged/app.merged.dll) $(INPUTS)
+
+merge-assemblies-win:
+	powershell -ExecutionPolicy Bypass -File .\scripts\merge-assemblies.ps1 -Output $(or $(OUTPUT),.\bin\merged\app.merged.dll) -Input $(INPUTS)
 
 test:
 	go test ./...

@@ -61,7 +61,8 @@ public sealed class VirtualizationPass : IProtectionPass
 
                 try
                 {
-                    var compiler = new ILToVmCompiler(method);
+                    var (opcodeEncodeMap, opcodeDecodeMap) = BuildOpcodeMaps(ctx.Random, ctx.LowEntropy);
+                    var compiler = new ILToVmCompiler(method, opcodeEncodeMap);
                     if (!compiler.TryCompile(out var bytecode, out var tokenTable))
                         continue;
 
@@ -69,7 +70,8 @@ public sealed class VirtualizationPass : IProtectionPass
                     if (tokens == null)
                         continue;
 
-                    var dataType = InjectVmData(module, bytecode, tokens, ctx.Random, ctx.LowEntropy);
+                    var dispatchSchedule = BuildDispatchSchedule(bytecode.Length, ctx.Tier, ctx.Random, ctx.LowEntropy);
+                    var dataType = InjectVmData(module, bytecode, tokens, opcodeDecodeMap, dispatchSchedule, ctx.Random, ctx.LowEntropy);
                     ReplaceWithVmStub(module, method, dataType, vmRunRef);
                 }
                 catch
@@ -97,7 +99,22 @@ public sealed class VirtualizationPass : IProtectionPass
 
             var asm = Assembly.LoadFrom(vmPath);
             var vmType = asm.GetType("ShieldBinary.VmRuntime.VmRunner");
-            var runMethod = vmType?.GetMethod("Run", BindingFlags.Public | BindingFlags.Static);
+            var runMethod = vmType?.GetMethod(
+                "Run",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[]
+                {
+                    typeof(byte[]),
+                    typeof(int[]),
+                    typeof(byte[]),
+                    typeof(byte[]),
+                    typeof(object[]),
+                    typeof(object[]),
+                    typeof(int),
+                    typeof(Module),
+                },
+                null);
             if (runMethod == null)
                 return null;
 
@@ -127,7 +144,7 @@ public sealed class VirtualizationPass : IProtectionPass
         return result;
     }
 
-    private static TypeDef InjectVmData(ModuleDef module, byte[] bytecode, int[] tokens, Random rng, bool lowEntropy)
+    private static TypeDef InjectVmData(ModuleDef module, byte[] bytecode, int[] tokens, byte[] opcodeDecodeMap, byte[] dispatchSchedule, Random rng, bool lowEntropy)
     {
         int hash = 0;
         if (lowEntropy) { foreach (var b in bytecode) hash = hash * 31 + b; hash &= 0xFFFFFF; }
@@ -141,8 +158,12 @@ public sealed class VirtualizationPass : IProtectionPass
 
         var bcField = new FieldDefUser("B", new FieldSig(byteArraySig), dnlib.DotNet.FieldAttributes.Private | dnlib.DotNet.FieldAttributes.Static);
         var tokField = new FieldDefUser("T", new FieldSig(intArraySig), dnlib.DotNet.FieldAttributes.Private | dnlib.DotNet.FieldAttributes.Static);
+        var opField = new FieldDefUser("O", new FieldSig(byteArraySig), dnlib.DotNet.FieldAttributes.Private | dnlib.DotNet.FieldAttributes.Static);
+        var scheduleField = new FieldDefUser("S", new FieldSig(byteArraySig), dnlib.DotNet.FieldAttributes.Private | dnlib.DotNet.FieldAttributes.Static);
         dataType.Fields.Add(bcField);
         dataType.Fields.Add(tokField);
+        dataType.Fields.Add(opField);
+        dataType.Fields.Add(scheduleField);
 
         // Static cctor to initialize fields
         var cctor = new MethodDefUser(".cctor", MethodSig.CreateStatic(module.CorLibTypes.Void), dnlib.DotNet.MethodImplAttributes.IL, dnlib.DotNet.MethodAttributes.Private | dnlib.DotNet.MethodAttributes.Static | dnlib.DotNet.MethodAttributes.SpecialName | dnlib.DotNet.MethodAttributes.RTSpecialName);
@@ -153,6 +174,8 @@ public sealed class VirtualizationPass : IProtectionPass
         // Emit: B = bytecode, T = tokens
         EmitByteArrayInit(cctorBody, module, bcField, bytecode);
         EmitIntArrayInit(cctorBody, module, tokField, tokens);
+        EmitByteArrayInit(cctorBody, module, opField, opcodeDecodeMap);
+        EmitByteArrayInit(cctorBody, module, scheduleField, dispatchSchedule);
         cctorBody.Instructions.Add(Instruction.Create(OpCodes.Ret));
 
         return dataType;
@@ -200,6 +223,8 @@ public sealed class VirtualizationPass : IProtectionPass
 
         var bcField = dataType.Fields.First(f => f.Name == "B");
         var tokField = dataType.Fields.First(f => f.Name == "T");
+        var opField = dataType.Fields.First(f => f.Name == "O");
+        var scheduleField = dataType.Fields.First(f => f.Name == "S");
 
         var getExecutingAssembly = typeof(Assembly).GetMethod("GetExecutingAssembly", BindingFlags.Public | BindingFlags.Static, [])!;
         var getManifestModule = typeof(Assembly).GetMethod("get_ManifestModule", BindingFlags.Public | BindingFlags.Instance, [])!;
@@ -207,6 +232,8 @@ public sealed class VirtualizationPass : IProtectionPass
         var il = new List<Instruction>();
         il.Add(Instruction.Create(OpCodes.Ldsfld, bcField));
         il.Add(Instruction.Create(OpCodes.Ldsfld, tokField));
+        il.Add(Instruction.Create(OpCodes.Ldsfld, opField));
+        il.Add(Instruction.Create(OpCodes.Ldsfld, scheduleField));
 
         il.Add(Instruction.Create(OpCodes.Ldc_I4, argCount));
         il.Add(Instruction.Create(OpCodes.Newarr, module.CorLibTypes.Object.TypeDefOrRef));
@@ -250,5 +277,67 @@ public sealed class VirtualizationPass : IProtectionPass
         body.Variables.Clear();
         foreach (var i in il)
             body.Instructions.Add(i);
+    }
+
+    private static (byte[] encodeMap, byte[] decodeMap) BuildOpcodeMaps(Random rng, bool lowEntropy)
+    {
+        var encode = new byte[256];
+        var decode = new byte[256];
+        for (var i = 0; i < 256; i++)
+        {
+            encode[i] = (byte)i;
+            decode[i] = (byte)i;
+        }
+        if (lowEntropy)
+            return (encode, decode);
+
+        var canonicalOpcodes = Enum.GetValues(typeof(VmOpcode)).Cast<VmOpcode>().Select(v => (byte)v).Distinct().ToList();
+        var shuffled = canonicalOpcodes.ToList();
+        for (var i = shuffled.Count - 1; i > 0; i--)
+        {
+            var j = rng.Next(i + 1);
+            (shuffled[i], shuffled[j]) = (shuffled[j], shuffled[i]);
+        }
+
+        for (var i = 0; i < canonicalOpcodes.Count; i++)
+        {
+            var canonical = canonicalOpcodes[i];
+            var encoded = shuffled[i];
+            encode[canonical] = encoded;
+            decode[encoded] = canonical;
+        }
+        return (encode, decode);
+    }
+
+    private static byte[] BuildDispatchSchedule(int bytecodeLength, string tier, Random rng, bool lowEntropy)
+    {
+        if (lowEntropy)
+            return new byte[] { 0 };
+        var segments = Math.Max(2, Math.Min(64, bytecodeLength / 24));
+        var schedule = new byte[segments];
+        var enterprise = string.Equals(tier, "enterprise", StringComparison.OrdinalIgnoreCase);
+        var hasIndirect = false;
+        var hasNestedIndirect = false;
+        for (var i = 0; i < segments; i++)
+        {
+            // 0 = switch dispatch, 1 = indirect dispatch, 2 = nested-indirect dispatch, 3 = handler-table dispatch
+            if (enterprise)
+            {
+                var roll = rng.Next(100);
+                schedule[i] = roll < 22 ? (byte)0 : roll < 55 ? (byte)1 : roll < 80 ? (byte)2 : (byte)3;
+            }
+            else
+            {
+                var roll = rng.Next(100);
+                schedule[i] = roll < 50 ? (byte)0 : roll < 90 ? (byte)1 : (byte)3;
+            }
+            if (schedule[i] == 1) hasIndirect = true;
+            if (schedule[i] == 2) hasNestedIndirect = true;
+        }
+        if (!hasIndirect)
+            schedule[rng.Next(segments)] = 1;
+        if (enterprise && !hasNestedIndirect)
+            schedule[rng.Next(segments)] = 2;
+        return schedule;
     }
 }

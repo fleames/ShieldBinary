@@ -212,7 +212,9 @@ public sealed class NameObfuscationPass : IProtectionPass
         else
         {
             idx = ctx.Random.Next(ObfuscatedPrefixes.Length);
-            suff = ctx.Random.Next(1000, 99999);
+            suff = ctx.PolymorphicMode
+                ? ctx.Random.Next(10000, 9999999)
+                : ctx.Random.Next(1000, 99999);
         }
         return ObfuscatedPrefixes[idx] + suff.ToString("X");
     }

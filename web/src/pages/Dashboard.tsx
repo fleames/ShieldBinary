@@ -32,7 +32,28 @@ const TIERS = [
   },
 ];
 
+const ADVANCED_TECHNIQUES: { id: string; label: string; note?: string }[] = [
+  { id: 'resource_encryption', label: 'Resource encryption' },
+  { id: 'reference_proxy', label: 'Reference proxying' },
+  { id: 'delegate_proxy', label: 'Delegate proxying' },
+  { id: 'reflection_dispatch', label: 'Reflection dispatch' },
+  { id: 'type_scramble', label: 'Type scrambling' },
+  { id: 'assembly_embed', label: 'Assembly embed + resolver' },
+  { id: 'anti_decompiler', label: 'Anti-decompiler (conservative)' },
+  { id: 'anti_decompiler_aggressive', label: 'Anti-decompiler (aggressive)', note: 'Higher breakage risk' },
+  { id: 'invalid_metadata', label: 'Invalid/confusable metadata injection', note: 'Tooling-hostile mode' },
+  { id: 'method_body_encryption', label: 'Method body encryption (first-call decrypt)' },
+  { id: 'dynamic_method_generation', label: 'Dynamic method generation warmup' },
+  { id: 'runtime_rasp', label: 'Runtime self-protection (anti-debug/sandbox + integrity)' },
+  { id: 'local_var_promotion', label: 'Local variable promotion (heap-backed state bag)' },
+  { id: 'il_mutation', label: 'IL mutation equivalents' },
+];
+
 type JobStatus = 'idle' | 'uploading' | 'queued' | 'processing' | 'completed' | 'failed';
+type ProtectionPreset = 'compatibility' | 'balanced' | 'polymorphic';
+
+const POLYMORPHIC_PRESET_PROTECTIONS = ['il_mutation'];
+const PRO_OR_ENTERPRISE_TIERS = new Set(['pro', 'enterprise']);
 
 type JobSummary = {
   job_id: string;
@@ -40,6 +61,9 @@ type JobSummary = {
   progress: number;
   tier: string;
   binary_type?: string;
+  low_entropy?: boolean;
+  polymorphic_mode?: boolean;
+  protections?: string[];
   input_key: string;
   output_key?: string;
   error?: string;
@@ -50,13 +74,23 @@ function fileNameFromKey(key: string): string {
   return parts[parts.length - 1] || key;
 }
 
+function hasExactProtections(actual: string[], expected: string[]): boolean {
+  if (actual.length !== expected.length) return false;
+  const set = new Set(actual);
+  return expected.every((v) => set.has(v));
+}
+
 export default function Dashboard() {
   const { authFetch } = useAuth();
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [dragOver, setDragOver] = useState(false);
   const [selectedTier, setSelectedTier] = useState('basic');
+  const [preset, setPreset] = useState<ProtectionPreset>('balanced');
   const [lowEntropy, setLowEntropy] = useState(false);
+  const [polymorphicMode, setPolymorphicMode] = useState(false);
+  const [renameMode, setRenameMode] = useState<'random' | 'sequential' | 'unicode' | 'unprintable'>('random');
+  const [selectedProtections, setSelectedProtections] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<JobStatus>('idle');
@@ -65,6 +99,10 @@ export default function Dashboard() {
   const [jobError, setJobError] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const supportsAdvancedTechniques = PRO_OR_ENTERPRISE_TIERS.has(selectedTier);
+  const supportsPolymorphicMode = PRO_OR_ENTERPRISE_TIERS.has(selectedTier);
+  const supportsRenameMode = selectedTier === 'enterprise';
+  const supportsLowEntropy = selectedTier !== 'minimal';
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -89,6 +127,17 @@ export default function Dashboard() {
     }
   }, [authFetch]);
 
+  const buildProtectionPayload = useCallback(() => {
+    const p = supportsAdvancedTechniques ? [...selectedProtections] : [];
+    if (supportsRenameMode) {
+      if (renameMode === 'sequential') p.push('rename_mode_sequential');
+      else if (renameMode === 'unicode') p.push('rename_mode_unicode');
+      else if (renameMode === 'unprintable') p.push('rename_mode_unprintable');
+      else p.push('rename_mode_random');
+    }
+    return Array.from(new Set(p));
+  }, [selectedProtections, renameMode, supportsAdvancedTechniques, supportsRenameMode]);
+
   // Merge current job into list if not present (handles API/Redis sync delay)
   const displayJobs = useMemo(() => {
     if (!jobId) return jobs;
@@ -99,12 +148,15 @@ export default function Dashboard() {
       progress,
       tier: selectedTier,
       binary_type: undefined,
+      low_entropy: lowEntropy,
+      polymorphic_mode: polymorphicMode,
+      protections: buildProtectionPayload(),
       input_key: file ? `inputs/.../${file.name}` : '',
       output_key: status === 'completed' ? 'out' : undefined,
       error: jobError || undefined,
     };
     return [current, ...jobs];
-  }, [jobs, jobId, status, progress, selectedTier, file?.name, jobError]);
+  }, [jobs, jobId, status, progress, selectedTier, lowEntropy, polymorphicMode, buildProtectionPayload, file?.name, jobError]);
 
   const pollJob = useCallback((id: string) => {
     stopPolling();
@@ -158,6 +210,38 @@ export default function Dashboard() {
     }
   }, []);
 
+  const toggleProtection = useCallback((id: string) => {
+    setSelectedProtections((prev) => {
+      if (prev.includes(id)) return prev.filter((p) => p !== id);
+      return [...prev, id];
+    });
+  }, []);
+
+  const applyPreset = useCallback((nextPreset: ProtectionPreset) => {
+    if (nextPreset === 'polymorphic' && !supportsPolymorphicMode) {
+      nextPreset = 'balanced';
+    }
+    setPreset(nextPreset);
+    if (nextPreset === 'compatibility') {
+      setLowEntropy(true);
+      setPolymorphicMode(false);
+      setRenameMode('random');
+      setSelectedProtections([]);
+      return;
+    }
+    if (nextPreset === 'balanced') {
+      setLowEntropy(false);
+      setPolymorphicMode(false);
+      setRenameMode('random');
+      setSelectedProtections([]);
+      return;
+    }
+    setLowEntropy(false);
+    setPolymorphicMode(true);
+    setRenameMode('random');
+    setSelectedProtections(POLYMORPHIC_PRESET_PROTECTIONS);
+  }, [supportsPolymorphicMode]);
+
   const handleProtect = useCallback(async () => {
     if (!file) return;
     if (file.size > MAX_FILE_SIZE) {
@@ -189,7 +273,9 @@ export default function Dashboard() {
           input_key: uploadData.input_key,
           tier: selectedTier,
           binary_type: 'auto',
-          low_entropy: lowEntropy,
+          low_entropy: supportsLowEntropy ? lowEntropy : false,
+          polymorphic_mode: supportsPolymorphicMode ? polymorphicMode : false,
+          protections: buildProtectionPayload(),
         }),
       });
       if (!jobRes.ok) {
@@ -204,7 +290,7 @@ export default function Dashboard() {
       setStatus('failed');
       setError(e instanceof Error ? e.message : 'Something went wrong');
     }
-  }, [file, selectedTier, lowEntropy, pollJob, authFetch, fetchJobs]);
+  }, [file, selectedTier, lowEntropy, polymorphicMode, buildProtectionPayload, pollJob, authFetch, fetchJobs, supportsLowEntropy, supportsPolymorphicMode]);
 
   const handleDownload = useCallback(async () => {
     if (!jobId) return;
@@ -236,6 +322,11 @@ export default function Dashboard() {
     }
   }, [jobId, file?.name, authFetch, fetchJobs]);
 
+  const mergeRetryProtections = useCallback((jobProtections?: string[]) => {
+    if (jobProtections && jobProtections.length > 0) return jobProtections;
+    return buildProtectionPayload();
+  }, [buildProtectionPayload]);
+
   const handleRetryJob = useCallback(async (j: JobSummary) => {
     if (j.status !== 'failed' || !j.input_key) return;
     setRetryingId(j.job_id);
@@ -248,7 +339,9 @@ export default function Dashboard() {
           input_key: j.input_key,
           tier: j.tier || 'basic',
           binary_type: 'auto',
-          low_entropy: lowEntropy,
+          low_entropy: j.low_entropy ?? lowEntropy,
+          polymorphic_mode: j.polymorphic_mode ?? polymorphicMode,
+          protections: mergeRetryProtections(j.protections),
         }),
       });
       if (!jobRes.ok) {
@@ -268,7 +361,7 @@ export default function Dashboard() {
     } finally {
       setRetryingId(null);
     }
-  }, [authFetch, pollJob, fetchJobs, lowEntropy]);
+  }, [authFetch, pollJob, fetchJobs, lowEntropy, polymorphicMode, mergeRetryProtections]);
 
   const handleReset = useCallback(() => {
     stopPolling();
@@ -342,6 +435,39 @@ export default function Dashboard() {
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
+
+  useEffect(() => {
+    if (lowEntropy) setPolymorphicMode(false);
+  }, [lowEntropy]);
+
+  useEffect(() => {
+    if (!supportsAdvancedTechniques && selectedProtections.length > 0) {
+      setSelectedProtections([]);
+    }
+    if (!supportsRenameMode && renameMode !== 'random') {
+      setRenameMode('random');
+    }
+    if (!supportsPolymorphicMode && polymorphicMode) {
+      setPolymorphicMode(false);
+    }
+    if (!supportsLowEntropy && lowEntropy) {
+      setLowEntropy(false);
+    }
+  }, [supportsAdvancedTechniques, supportsRenameMode, supportsPolymorphicMode, supportsLowEntropy, selectedProtections.length, renameMode, polymorphicMode, lowEntropy]);
+
+  useEffect(() => {
+    if (lowEntropy && !polymorphicMode && renameMode === 'random' && selectedProtections.length === 0) {
+      setPreset('compatibility');
+      return;
+    }
+    if (!lowEntropy && !polymorphicMode && renameMode === 'random' && selectedProtections.length === 0) {
+      setPreset('balanced');
+      return;
+    }
+    if (!lowEntropy && polymorphicMode && renameMode === 'random' && hasExactProtections(selectedProtections, POLYMORPHIC_PRESET_PROTECTIONS)) {
+      setPreset('polymorphic');
+    }
+  }, [lowEntropy, polymorphicMode, renameMode, selectedProtections]);
 
   useEffect(() => () => stopPolling(), [stopPolling]);
 
@@ -506,6 +632,41 @@ export default function Dashboard() {
       <div style={{ marginTop: '1rem' }}>
         <label
           style={{
+            display: 'block',
+            marginBottom: '0.5rem',
+            fontSize: '0.875rem',
+            color: 'var(--text-muted)',
+          }}
+        >
+          Preset profile
+        </label>
+        <select
+          value={preset}
+          onChange={(e) => applyPreset(e.target.value as ProtectionPreset)}
+          disabled={status === 'uploading' || status === 'queued' || status === 'processing'}
+          style={{
+            width: '100%',
+            padding: '0.55rem 0.7rem',
+            borderRadius: 8,
+            border: '1px solid var(--border)',
+            background: 'var(--bg-elevated)',
+            color: 'var(--text)',
+            marginBottom: '0.55rem',
+          }}
+        >
+          <option value="compatibility">Compatibility</option>
+          <option value="balanced">Balanced</option>
+          {supportsPolymorphicMode && <option value="polymorphic">Polymorphic</option>}
+        </select>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          Compatibility = low-entropy safe defaults, Balanced = general defaults, Polymorphic = high-variance templates.
+        </div>
+      </div>
+
+      {supportsLowEntropy && (
+      <div style={{ marginTop: '1rem' }}>
+        <label
+          style={{
             display: 'flex',
             alignItems: 'center',
             gap: '0.75rem',
@@ -528,6 +689,94 @@ export default function Dashboard() {
           </span>
         </label>
       </div>
+      )}
+
+      {supportsPolymorphicMode && (
+      <div style={{ marginTop: '0.75rem' }}>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            padding: '0.75rem 1rem',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            cursor: 'pointer',
+            background: 'var(--bg-elevated)',
+            opacity: status === 'uploading' || status === 'queued' || status === 'processing' ? 0.6 : 1,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={polymorphicMode}
+            onChange={(e) => setPolymorphicMode(e.target.checked)}
+            disabled={status === 'uploading' || status === 'queued' || status === 'processing' || lowEntropy}
+          />
+          <span>
+            <strong>Polymorphic mode</strong> — Higher-variance IL templates per build
+            {lowEntropy && <span style={{ color: 'var(--text-muted)' }}> (disabled while Low entropy is on)</span>}
+          </span>
+        </label>
+      </div>
+      )}
+
+      {supportsRenameMode && (
+      <div style={{ marginTop: '1rem' }}>
+        <label
+          style={{
+            display: 'block',
+            marginBottom: '0.5rem',
+            fontSize: '0.875rem',
+            color: 'var(--text-muted)',
+          }}
+        >
+          Name obfuscation mode
+        </label>
+        <select
+          value={renameMode}
+          onChange={(e) => setRenameMode(e.target.value as 'random' | 'sequential' | 'unicode' | 'unprintable')}
+          disabled={status === 'uploading' || status === 'queued' || status === 'processing'}
+          style={{
+            width: '100%',
+            padding: '0.55rem 0.7rem',
+            borderRadius: 8,
+            border: '1px solid var(--border)',
+            background: 'var(--bg-elevated)',
+            color: 'var(--text)',
+          }}
+        >
+          <option value="random">Random (default)</option>
+          <option value="sequential">Sequential</option>
+          <option value="unicode">Unicode</option>
+          <option value="unprintable">Unprintable (unsafe)</option>
+        </select>
+      </div>
+      )}
+
+      {supportsAdvancedTechniques && (
+      <div style={{ marginTop: '1rem', border: '1px solid var(--border)', borderRadius: 8, padding: '0.9rem', background: 'var(--bg-elevated)' }}>
+        <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>Advanced .NET techniques (opt-in)</div>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.65rem' }}>
+          Selected options are applied per job. Aggressive modes can reduce compatibility.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.45rem 0.8rem' }}>
+          {ADVANCED_TECHNIQUES.map((tech) => (
+            <label key={tech.id} style={{ display: 'flex', gap: '0.55rem', alignItems: 'flex-start', opacity: status === 'uploading' || status === 'queued' || status === 'processing' ? 0.6 : 1 }}>
+              <input
+                type="checkbox"
+                checked={selectedProtections.includes(tech.id)}
+                onChange={() => toggleProtection(tech.id)}
+                disabled={status === 'uploading' || status === 'queued' || status === 'processing'}
+              />
+              <span style={{ fontSize: '0.84rem' }}>
+                {tech.label}
+                {tech.note && <span style={{ color: 'var(--text-muted)' }}> - {tech.note}</span>}
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+      )}
 
       <div style={{ marginTop: '2rem', display: 'flex', gap: '0.75rem' }}>
         <button
@@ -640,6 +889,8 @@ export default function Dashboard() {
                     </span>
                   )}{' '}
                   · {j.status}
+                  {j.polymorphic_mode && ' · polymorphic'}
+                  {j.protections && j.protections.length > 0 && ` · ${j.protections.length} opt-ins`}
                   {j.error && ` · ${j.error}`}
                 </div>
               </div>

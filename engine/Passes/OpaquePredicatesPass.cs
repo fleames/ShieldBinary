@@ -36,7 +36,7 @@ public sealed class OpaquePredicatesPass : IProtectionPass
 
     private static void InsertPredicates(CilBody body, PipelineContext ctx)
     {
-        var count = ctx.Random.Next(1, 3);
+        var count = ctx.PolymorphicMode ? ctx.Random.Next(2, 5) : ctx.Random.Next(1, 3);
         var protectedSet = CilBodyExtensions.GetProtectedInstructions(body);
 
         for (var n = 0; n < count; n++)
@@ -47,8 +47,6 @@ public sealed class OpaquePredicatesPass : IProtectionPass
             if (protectedSet.Contains(body.Instructions[idx]))
                 continue;
 
-            // Opaque: (x * x) >= 0 is always true for int. Push 1 via: 7*7=49, ldc 49, ldc 0, cgt -> 1
-            // Or: any odd^2 mod 2 == 1. ldc 5, dup, mul, ldc 2, rem -> 1. Brtrue always taken.
             var odd = 3 + ctx.Random.Next(10) * 2;
             var realNext = body.Instructions[idx];
 
@@ -59,22 +57,62 @@ public sealed class OpaquePredicatesPass : IProtectionPass
                 Instruction.Create(OpCodes.Br, realNext),
             };
 
-            var predicate = new List<Instruction>
-            {
-                Instruction.Create(OpCodes.Ldc_I4, odd),
-                Instruction.Create(OpCodes.Dup),
-                Instruction.Create(OpCodes.Mul),
-                Instruction.Create(OpCodes.Ldc_I4, 2),
-                Instruction.Create(OpCodes.Rem),
-                Instruction.Create(OpCodes.Ldc_I4_0),
-                Instruction.Create(OpCodes.Ceq),
-                Instruction.Create(OpCodes.Brfalse, dummyBlock[0]),
-            };
+            var predicate = BuildPredicate(ctx, odd, dummyBlock[0]);
 
             foreach (var ins in predicate.AsEnumerable().Reverse())
                 body.Instructions.Insert(idx, ins);
             foreach (var ins in dummyBlock.AsEnumerable().Reverse())
                 body.Instructions.Insert(idx + predicate.Count, ins);
         }
+    }
+
+    private static List<Instruction> BuildPredicate(PipelineContext ctx, int odd, Instruction dummyTarget)
+    {
+        var mode = ctx.PolymorphicMode ? ctx.Random.Next(3) : ctx.Random.Next(2);
+        if (mode == 0)
+        {
+            // Formally valid identity: x xor x == 0
+            var x = ctx.Random.Next(7, 511);
+            return new List<Instruction>
+            {
+                Instruction.Create(OpCodes.Ldc_I4, x),
+                Instruction.Create(OpCodes.Ldc_I4, x),
+                Instruction.Create(OpCodes.Xor),
+                Instruction.Create(OpCodes.Ldc_I4_0),
+                Instruction.Create(OpCodes.Ceq),
+                Instruction.Create(OpCodes.Brfalse, dummyTarget),
+            };
+        }
+        if (mode == 1)
+        {
+            // Formally valid identity over integers: ((x * x) - (x * x)) == 0
+            var x = ctx.Random.Next(9, 997);
+            return new List<Instruction>
+            {
+                Instruction.Create(OpCodes.Ldc_I4, x),
+                Instruction.Create(OpCodes.Dup),
+                Instruction.Create(OpCodes.Mul),
+                Instruction.Create(OpCodes.Ldc_I4, x),
+                Instruction.Create(OpCodes.Ldc_I4, x),
+                Instruction.Create(OpCodes.Mul),
+                Instruction.Create(OpCodes.Sub),
+                Instruction.Create(OpCodes.Ldc_I4_0),
+                Instruction.Create(OpCodes.Ceq),
+                Instruction.Create(OpCodes.Brfalse, dummyTarget),
+            };
+        }
+
+        // Formally valid parity invariant: odd^2 mod 2 != 0
+        return new List<Instruction>
+        {
+            Instruction.Create(OpCodes.Ldc_I4, odd),
+            Instruction.Create(OpCodes.Dup),
+            Instruction.Create(OpCodes.Mul),
+            Instruction.Create(OpCodes.Ldc_I4, 2),
+            Instruction.Create(OpCodes.Rem),
+            Instruction.Create(OpCodes.Ldc_I4_0),
+            Instruction.Create(OpCodes.Ceq),
+            Instruction.Create(OpCodes.Brfalse, dummyTarget),
+        };
     }
 }

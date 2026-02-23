@@ -33,6 +33,7 @@ public sealed class IlMutationPass : IProtectionPass
 
     private static void MutateMethod(PipelineContext ctx, CilBody body)
     {
+        var mutateChance = ctx.PolymorphicMode ? 80 : 35;
         for (var i = 0; i < body.Instructions.Count; i++)
         {
             var ins = body.Instructions[i];
@@ -40,7 +41,7 @@ public sealed class IlMutationPass : IProtectionPass
                 continue;
             if (Math.Abs(value) <= 1)
                 continue; // keep tiny constants stable for compatibility/readability
-            if (ctx.Random.Next(100) > 35)
+            if (ctx.Random.Next(100) >= mutateChance)
                 continue;
 
             var key = SelectKey(ctx, value);
