@@ -48,6 +48,14 @@ type Config struct {
 	VMRunnerTimeoutSec      int    `mapstructure:"vm_runner_timeout_sec"`
 	VMRunnerMaxPayloadBytes int64  `mapstructure:"vm_runner_max_payload_bytes"`
 
+	// Optional malware scan via remote Windows VM service (Defender-first)
+	EnableVMScan          bool   `mapstructure:"enable_vm_scan"`
+	VMScanMode            string `mapstructure:"vm_scan_mode"` // off|windows_vm_defender
+	VMScanURL             string `mapstructure:"vm_scan_url"`
+	VMScanAuthToken       string `mapstructure:"vm_scan_auth_token"`
+	VMScanTimeoutSec      int    `mapstructure:"vm_scan_timeout_sec"`
+	VMScanMaxPayloadBytes int64  `mapstructure:"vm_scan_max_payload_bytes"`
+
 	// Threat intelligence (manual opt-in; VirusTotal first)
 	EnableThreatIntel           bool   `mapstructure:"enable_threat_intel"`
 	ThreatIntelProvider         string `mapstructure:"threat_intel_provider"`
@@ -106,6 +114,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("compat_output_max_bytes", 1200)
 	viper.SetDefault("vm_runner_timeout_sec", 45)
 	viper.SetDefault("vm_runner_max_payload_bytes", 120*1024*1024)
+	viper.SetDefault("enable_vm_scan", false)
+	viper.SetDefault("vm_scan_mode", "off")
+	viper.SetDefault("vm_scan_timeout_sec", 90)
+	viper.SetDefault("vm_scan_max_payload_bytes", 120*1024*1024)
 	viper.SetDefault("enable_threat_intel", false)
 	viper.SetDefault("threat_intel_provider", "virustotal")
 	viper.SetDefault("threat_intel_poll_interval_sec", 30)
@@ -153,6 +165,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("SHIELD_VM_RUNNER_AUTH_TOKEN"); v != "" {
 		cfg.VMRunnerAuthToken = v
+	}
+	if v := os.Getenv("SHIELD_VM_SCAN_AUTH_TOKEN"); v != "" {
+		cfg.VMScanAuthToken = v
 	}
 	if v := os.Getenv("SHIELD_VT_API_KEY"); v != "" {
 		cfg.VTAPIKey = v

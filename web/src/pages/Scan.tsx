@@ -17,6 +17,16 @@ type ScanResult = {
   protection_tier?: string;
   payload_size?: number;
   embedding?: string;
+  av_report?: {
+    provider?: string;
+    mode?: string;
+    verdict?: string;
+    threat_names?: string[];
+    threat_count?: number;
+    timed_out?: boolean;
+    runner_id?: string;
+    notes?: string;
+  };
   error?: string;
 };
 
@@ -234,6 +244,49 @@ export default function Scan() {
                               <td style={{ padding: '0.35rem 0' }}>
                                 {result.payload_size.toLocaleString()} bytes
                               </td>
+                            </tr>
+                          )}
+                        </>
+                      )}
+                      {result.av_report && (
+                        <>
+                          <tr>
+                            <td style={{ padding: '0.35rem 0.5rem 0.35rem 0', color: 'var(--text-muted)' }}>
+                              AV provider
+                            </td>
+                            <td style={{ padding: '0.35rem 0' }}>
+                              {result.av_report.provider || 'windows_defender'}
+                              {result.av_report.mode ? ` (${result.av_report.mode})` : ''}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style={{ padding: '0.35rem 0.5rem 0.35rem 0', color: 'var(--text-muted)' }}>
+                              AV verdict
+                            </td>
+                            <td style={{ padding: '0.35rem 0' }}>
+                              {result.av_report.verdict === 'infected' ? (
+                                <Badge tone="danger">Infected</Badge>
+                              ) : result.av_report.verdict === 'clean' ? (
+                                <Badge tone="success">Clean</Badge>
+                              ) : (
+                                <Badge tone="warning">{result.av_report.verdict || 'Unknown'}</Badge>
+                              )}
+                            </td>
+                          </tr>
+                          {Array.isArray(result.av_report.threat_names) && result.av_report.threat_names.length > 0 && (
+                            <tr>
+                              <td style={{ padding: '0.35rem 0.5rem 0.35rem 0', color: 'var(--text-muted)' }}>
+                                Threats
+                              </td>
+                              <td style={{ padding: '0.35rem 0' }}>{result.av_report.threat_names.join(', ')}</td>
+                            </tr>
+                          )}
+                          {result.av_report.notes && (
+                            <tr>
+                              <td style={{ padding: '0.35rem 0.5rem 0.35rem 0', color: 'var(--text-muted)' }}>
+                                AV notes
+                              </td>
+                              <td style={{ padding: '0.35rem 0' }}>{result.av_report.notes}</td>
                             </tr>
                           )}
                         </>

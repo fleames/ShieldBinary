@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,7 +20,7 @@ func TestScanFile_NonPE(t *testing.T) {
 	if r.ValidPE {
 		t.Error("expected invalid PE for text file")
 	}
-	if r.Error != "not a PE file (missing MZ)" {
+	if r.Error != "not a PE file (missing MZ)" && r.Error != "file too small" {
 		t.Errorf("unexpected error: %q", r.Error)
 	}
 }

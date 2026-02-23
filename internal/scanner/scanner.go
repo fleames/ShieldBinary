@@ -26,17 +26,31 @@ const (
 
 // Result holds the scan result for a single executable.
 type Result struct {
-	Path              string `json:"path"`
-	Size              int64  `json:"size"`
-	ValidPE           bool   `json:"valid_pe"`
-	IsDotNet          bool   `json:"is_dotnet"`
-	Machine           string `json:"machine,omitempty"`
-	Protected         bool   `json:"protected"`
-	ProtectionFormat  string `json:"protection_format,omitempty"` // "sbp2_section", "sbp2_overlay", "sbpk"
-	ProtectionTier    string `json:"protection_tier,omitempty"`  // "basic", "enterprise" (from flags)
-	PayloadSize       int64  `json:"payload_size,omitempty"`
-	Embedding         string `json:"embedding,omitempty"` // "section", "overlay"
-	Error             string `json:"error,omitempty"`
+	Path             string    `json:"path"`
+	Size             int64     `json:"size"`
+	ValidPE          bool      `json:"valid_pe"`
+	IsDotNet         bool      `json:"is_dotnet"`
+	Machine          string    `json:"machine,omitempty"`
+	Protected        bool      `json:"protected"`
+	ProtectionFormat string    `json:"protection_format,omitempty"` // "sbp2_section", "sbp2_overlay", "sbpk"
+	ProtectionTier   string    `json:"protection_tier,omitempty"`   // "basic", "enterprise" (from flags)
+	PayloadSize      int64     `json:"payload_size,omitempty"`
+	Embedding        string    `json:"embedding,omitempty"` // "section", "overlay"
+	AVReport         *AVReport `json:"av_report,omitempty"`
+	Error            string    `json:"error,omitempty"`
+}
+
+type AVReport struct {
+	Provider      string   `json:"provider,omitempty"` // e.g. windows_defender
+	Mode          string   `json:"mode,omitempty"`     // e.g. windows_vm
+	Verdict       string   `json:"verdict,omitempty"`  // clean|infected|warning|unknown
+	ThreatNames   []string `json:"threat_names,omitempty"`
+	ThreatCount   int      `json:"threat_count,omitempty"`
+	TimedOut      bool     `json:"timed_out,omitempty"`
+	RunnerID      string   `json:"runner_id,omitempty"`
+	StdoutSnippet string   `json:"stdout_snippet,omitempty"`
+	StderrSnippet string   `json:"stderr_snippet,omitempty"`
+	Notes         string   `json:"notes,omitempty"`
 }
 
 // ScanFile scans a single file and returns the result.

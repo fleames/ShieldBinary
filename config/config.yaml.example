@@ -32,6 +32,14 @@ vm_runner_timeout_sec: 45
 vm_runner_max_payload_bytes: 125829120
 # vm_runner_auth_token: use SHIELD_VM_RUNNER_AUTH_TOKEN env var
 
+# Optional malware scan via VM controller (Windows Defender)
+enable_vm_scan: false
+vm_scan_mode: off # off | windows_vm_defender
+vm_scan_url: ""
+vm_scan_timeout_sec: 90
+vm_scan_max_payload_bytes: 125829120
+# vm_scan_auth_token: use SHIELD_VM_SCAN_AUTH_TOKEN env var
+
 # Threat intelligence (manual opt-in)
 enable_threat_intel: false
 threat_intel_provider: virustotal

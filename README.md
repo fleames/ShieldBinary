@@ -294,6 +294,22 @@ Notes:
 - Full deployment walkthrough: `docs/windows-vm-runner-setup.md`
 - Strength score is a heuristic estimate and should be treated as directional guidance, not proof.
 
+### Optional malware scan via Windows Defender VM
+
+The `/api/v1/scan` endpoint can optionally call a host-side Hyper-V scanner service that runs Windows Defender in a disposable guest and restores snapshot state for every scan.
+
+Config:
+- `SHIELD_ENABLE_VM_SCAN=1`
+- `SHIELD_VM_SCAN_MODE=windows_vm_defender`
+- `SHIELD_VM_SCAN_URL=http://<host>:9091`
+- `SHIELD_VM_SCAN_AUTH_TOKEN=<token>`
+- `SHIELD_VM_SCAN_TIMEOUT_SEC=90`
+- `SHIELD_VM_SCAN_MAX_PAYLOAD_BYTES=125829120`
+
+When enabled, scan response includes an `av_report` block (provider/verdict/threat names/notes).
+
+Setup guide: `docs/windows-vm-av-scanner-setup.md`
+
 ### Threat intelligence feedback loop (manual opt-in)
 
 ShieldBinary now supports a manual opt-in threat intelligence flow (VirusTotal first integration):

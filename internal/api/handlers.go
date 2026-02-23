@@ -237,6 +237,19 @@ func (s *Server) handleScan(c *gin.Context) {
 		return
 	}
 	result := scanner.ScanBytes(file.Filename, data)
+	if s.cfg.EnableVMScan && strings.EqualFold(strings.TrimSpace(s.cfg.VMScanMode), "windows_vm_defender") {
+		av, avErr := s.scanWithVMDefender(c.Request.Context(), file.Filename, data)
+		if avErr != nil {
+			result.AVReport = &scanner.AVReport{
+				Provider: "windows_defender",
+				Mode:     "windows_vm",
+				Verdict:  "warning",
+				Notes:    "vm scan request failed: " + avErr.Error(),
+			}
+		} else {
+			result.AVReport = av
+		}
+	}
 	c.JSON(http.StatusOK, result)
 }
 
