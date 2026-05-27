@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <!-- Dot grid pattern -->
+    <pattern id="dots" x="0" y="0" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="rgba(255,255,255,0.032)"/>
+    </pattern>
+    <!-- Gradient orbs -->
+    <radialGradient id="orb1" cx="18%" cy="20%" r="50%">
+      <stop offset="0%" stop-color="rgba(80,144,255,0.22)"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </radialGradient>
+    <radialGradient id="orb2" cx="82%" cy="15%" r="44%">
+      <stop offset="0%" stop-color="rgba(146,101,255,0.18)"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </radialGradient>
+    <radialGradient id="orb3" cx="50%" cy="100%" r="42%">
+      <stop offset="0%" stop-color="rgba(0,205,208,0.08)"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </radialGradient>
+    <!-- Text gradients -->
+    <linearGradient id="headline-g" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#dce8ff"/>
+      <stop offset="45%" stop-color="#5090ff"/>
+      <stop offset="100%" stop-color="#9265ff"/>
+    </linearGradient>
+    <linearGradient id="brand-g" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ecf1ff"/>
+      <stop offset="100%" stop-color="#a6c8ff"/>
+    </linearGradient>
+    <!-- Shield gradient -->
+    <linearGradient id="shield-g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5090ff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#9265ff" stop-opacity="0.22"/>
+    </linearGradient>
+    <linearGradient id="shield-stroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5090ff" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#9265ff" stop-opacity="0.55"/>
+    </linearGradient>
+    <!-- Card border gradient -->
+    <linearGradient id="card-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="rgba(80,144,255,0.45)"/>
+      <stop offset="100%" stop-color="rgba(146,101,255,0.3)"/>
+    </linearGradient>
+    <!-- Glow filter -->
+    <filter id="text-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shield-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Base background -->
+  <rect width="1200" height="630" fill="#030609"/>
+
+  <!-- Gradient orbs -->
+  <rect width="1200" height="630" fill="url(#orb1)"/>
+  <rect width="1200" height="630" fill="url(#orb2)"/>
+  <rect width="1200" height="630" fill="url(#orb3)"/>
+
+  <!-- Dot grid -->
+  <rect width="1200" height="630" fill="url(#dots)"/>
+
+  <!-- Outer card border glow -->
+  <rect x="1" y="1" width="1198" height="628" rx="0"
+        fill="none" stroke="url(#card-border)" stroke-width="1.5"/>
+
+  <!-- ── Shield illustration (right side) ── -->
+  <!-- Outer glow ring -->
+  <ellipse cx="910" cy="315" rx="175" ry="175" fill="rgba(80,144,255,0.04)" filter="url(#shield-glow)"/>
+  <ellipse cx="910" cy="315" rx="140" ry="140" fill="rgba(80,144,255,0.03)"/>
+
+  <!-- Shield shape -->
+  <path d="M910 175 L990 210 L990 300 C990 360 955 405 910 430 C865 405 830 360 830 300 L830 210 Z"
+        fill="url(#shield-g)" stroke="url(#shield-stroke)" stroke-width="2" stroke-linejoin="round"
+        filter="url(#shield-glow)"/>
+
+  <!-- Shield inner check / lock mark -->
+  <path d="M895 300 L906 312 L928 288"
+        fill="none" stroke="#5090ff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"
+        opacity="0.85"/>
+
+  <!-- Orbiting ring 1 -->
+  <ellipse cx="910" cy="315" rx="112" ry="112" fill="none"
+           stroke="rgba(80,144,255,0.18)" stroke-width="1" stroke-dasharray="6 4"/>
+
+  <!-- Orbiting ring 2 -->
+  <ellipse cx="910" cy="315" rx="145" ry="145" fill="none"
+           stroke="rgba(146,101,255,0.12)" stroke-width="1" stroke-dasharray="4 6"/>
+
+  <!-- Floating technique labels around shield -->
+  <!-- Top label -->
+  <rect x="830" y="148" width="160" height="26" rx="13"
+        fill="rgba(80,144,255,0.1)" stroke="rgba(80,144,255,0.3)" stroke-width="1"/>
+  <text x="910" y="165" text-anchor="middle"
+        fill="rgba(160,200,255,0.85)" font-family="system-ui, -apple-system, sans-serif"
+        font-size="11" font-weight="600" letter-spacing="0.05em">IL VIRTUALIZATION</text>
+
+  <!-- Right label -->
+  <rect x="1010" y="250" width="150" height="26" rx="13"
+        fill="rgba(146,101,255,0.1)" stroke="rgba(146,101,255,0.3)" stroke-width="1"/>
+  <text x="1085" y="267" text-anchor="middle"
+        fill="rgba(190,160,255,0.85)" font-family="system-ui, -apple-system, sans-serif"
+        font-size="11" font-weight="600" letter-spacing="0.05em">ANTI-DEBUG</text>
+
+  <!-- Bottom-right label -->
+  <rect x="1000" y="370" width="152" height="26" rx="13"
+        fill="rgba(0,205,208,0.08)" stroke="rgba(0,205,208,0.28)" stroke-width="1"/>
+  <text x="1076" y="387" text-anchor="middle"
+        fill="rgba(150,240,240,0.8)" font-family="system-ui, -apple-system, sans-serif"
+        font-size="11" font-weight="600" letter-spacing="0.05em">ANTI-TAMPER</text>
+
+  <!-- Left label -->
+  <rect x="720" y="370" width="98" height="26" rx="13"
+        fill="rgba(31,207,120,0.08)" stroke="rgba(31,207,120,0.28)" stroke-width="1"/>
+  <text x="769" y="387" text-anchor="middle"
+        fill="rgba(150,255,210,0.8)" font-family="system-ui, -apple-system, sans-serif"
+        font-size="11" font-weight="600" letter-spacing="0.05em">AES-GCM</text>
+
+  <!-- ── Left content area ── -->
+
+  <!-- Brand name -->
+  <text x="72" y="118"
+        fill="url(#brand-g)"
+        font-family="'JetBrains Mono', 'Courier New', monospace"
+        font-weight="700" font-size="19" letter-spacing="0.03em">
+    Ghost<tspan fill="#5090ff">Binary</tspan>
+  </text>
+
+  <!-- Divider under brand -->
+  <line x1="72" y1="130" x2="200" y2="130" stroke="rgba(80,144,255,0.3)" stroke-width="1"/>
+
+  <!-- Main headline line 1 -->
+  <text x="72" y="245"
+        fill="url(#headline-g)"
+        font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+        font-weight="800" font-size="62" letter-spacing="-2.5">
+    Stop Reverse
+  </text>
+
+  <!-- Main headline line 2 -->
+  <text x="72" y="320"
+        fill="url(#headline-g)"
+        font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+        font-weight="800" font-size="62" letter-spacing="-2.5">
+    Engineers Cold.
+  </text>
+
+  <!-- Sub-headline -->
+  <text x="72" y="376"
+        fill="rgba(134,150,186,0.9)"
+        font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+        font-size="22" font-weight="400" letter-spacing="-0.3">
+    Protect .NET and Windows apps from cracking,
+  </text>
+  <text x="72" y="405"
+        fill="rgba(134,150,186,0.9)"
+        font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+        font-size="22" font-weight="400" letter-spacing="-0.3">
+    tampering, and malware analysis.
+  </text>
+
+  <!-- Feature chips -->
+  <!-- Chip 1 -->
+  <rect x="72" y="448" width="138" height="30" rx="15"
+        fill="rgba(80,144,255,0.1)" stroke="rgba(80,144,255,0.32)" stroke-width="1"/>
+  <text x="141" y="467" text-anchor="middle"
+        fill="rgba(166,200,255,0.9)"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="12" font-weight="600" letter-spacing="0.04em">VM OBFUSCATION</text>
+
+  <!-- Chip 2 -->
+  <rect x="220" y="448" width="126" height="30" rx="15"
+        fill="rgba(146,101,255,0.1)" stroke="rgba(146,101,255,0.32)" stroke-width="1"/>
+  <text x="283" y="467" text-anchor="middle"
+        fill="rgba(190,166,255,0.9)"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="12" font-weight="600" letter-spacing="0.04em">CONTROL FLOW</text>
+
+  <!-- Chip 3 -->
+  <rect x="356" y="448" width="92" height="30" rx="15"
+        fill="rgba(31,207,120,0.08)" stroke="rgba(31,207,120,0.28)" stroke-width="1"/>
+  <text x="402" y="467" text-anchor="middle"
+        fill="rgba(146,240,200,0.9)"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="12" font-weight="600" letter-spacing="0.04em">ANTI-DEBUG</text>
+
+  <!-- Chip 4 -->
+  <rect x="458" y="448" width="92" height="30" rx="15"
+        fill="rgba(0,205,208,0.08)" stroke="rgba(0,205,208,0.28)" stroke-width="1"/>
+  <text x="504" y="467" text-anchor="middle"
+        fill="rgba(140,235,237,0.9)"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="12" font-weight="600" letter-spacing="0.04em">CI/CD API</text>
+
+  <!-- Bottom bar -->
+  <rect x="72" y="556" width="600" height="1" fill="rgba(255,255,255,0.07)"/>
+
+  <!-- Beta badge -->
+  <rect x="72" y="570" width="106" height="24" rx="12"
+        fill="rgba(80,144,255,0.12)" stroke="rgba(80,144,255,0.35)" stroke-width="1"/>
+  <text x="125" y="586" text-anchor="middle"
+        fill="rgba(166,200,255,0.95)"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="11" font-weight="700" letter-spacing="0.06em">PUBLIC BETA</text>
+
+  <!-- "Free" label -->
+  <text x="190" y="586"
+        fill="rgba(134,150,186,0.7)"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="12" letter-spacing="-0.2">
+    · All tiers free · No credit card required
+  </text>
+
+</svg>

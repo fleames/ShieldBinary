@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0c1a34"/>
+      <stop offset="100%" stop-color="#030609"/>
+    </linearGradient>
+    <linearGradient id="bd" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5090ff" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#9265ff" stop-opacity="0.5"/>
+    </linearGradient>
+    <linearGradient id="txt" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#5090ff"/>
+      <stop offset="100%" stop-color="#9265ff"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="32" height="32" rx="7" fill="url(#bg)"/>
+  <!-- Gradient border -->
+  <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="6.25"
+        fill="none" stroke="url(#bd)" stroke-width="1.5"/>
+  <!-- Ghost shield shape: top arc + body -->
+  <path d="M16 6 L22 9 L22 15 C22 19.5 19 22.5 16 24 C13 22.5 10 19.5 10 15 L10 9 Z"
+        fill="none" stroke="url(#bd)" stroke-width="1.2" stroke-linejoin="round"/>
+  <!-- G letter inside shield -->
+  <text x="16" y="20.5" text-anchor="middle"
+        fill="url(#txt)"
+        font-family="Inter, system-ui, -apple-system, sans-serif"
+        font-weight="800" font-size="9.5" letter-spacing="-0.3">G</text>
+</svg>
