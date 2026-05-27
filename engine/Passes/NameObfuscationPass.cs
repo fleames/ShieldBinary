@@ -38,19 +38,10 @@ public sealed class NameObfuscationPass : IProtectionPass
         // Don't obfuscate entry point type or its nested types
         if (IsOrNestedIn(entryPointType, type))
             return true;
-        // Don't obfuscate public types - they're used by reflection, DI, serialization, plugins
-        if (IsPublicOrNestedPublic(type))
-            return true;
         // Don't obfuscate types used by reflection/serialization (or their nested types)
         if (HasReflectionSensitiveAttributeInHierarchy(type))
             return true;
         return false;
-    }
-
-    private static bool IsPublicOrNestedPublic(TypeDef type)
-    {
-        var vis = type.Attributes & TypeAttributes.VisibilityMask;
-        return vis == TypeAttributes.Public || vis == TypeAttributes.NestedPublic;
     }
 
     private static bool IsOrNestedIn(TypeDef? ancestor, TypeDef? type)
