@@ -275,18 +275,35 @@ public static class VmRunner
                 return false;
 
             case VmOpcode.Call:
-                var callTarget = module.ResolveMethod(ReadToken(bc, ref ip, tokens));
-                var callArgs = PopArgs(callTarget.GetParameters().Length, stack, ref sp);
-                stack[sp++] = callTarget.Invoke(null, callArgs);
+                var callMethod = (MethodInfo)module.ResolveMethod(ReadToken(bc, ref ip, tokens));
+                var callParamCount = callMethod.GetParameters().Length;
+                object callResult;
+                if (callMethod.IsStatic)
+                {
+                    var callArgs = PopArgs(callParamCount, stack, ref sp);
+                    callResult = callMethod.Invoke(null, callArgs);
+                }
+                else
+                {
+                    var callAllArgs = PopArgs(callParamCount + 1, stack, ref sp);
+                    var callThis = callAllArgs[0];
+                    var callArgArr = new object[callParamCount];
+                    Array.Copy(callAllArgs, 1, callArgArr, 0, callParamCount);
+                    callResult = callMethod.Invoke(callThis, callArgArr);
+                }
+                if (callMethod.ReturnType != typeof(void))
+                    stack[sp++] = callResult;
                 return false;
             case VmOpcode.Callvirt:
-                var virtTarget = module.ResolveMethod(ReadToken(bc, ref ip, tokens))!;
-                var virtParamCount = virtTarget.GetParameters().Length;
+                var virtMethod = (MethodInfo)module.ResolveMethod(ReadToken(bc, ref ip, tokens))!;
+                var virtParamCount = virtMethod.GetParameters().Length;
                 var virtArgs = PopArgs(virtParamCount + 1, stack, ref sp);
                 var virtThis = virtArgs[0];
                 var virtArgArr = new object[virtParamCount];
                 Array.Copy(virtArgs, 1, virtArgArr, 0, virtParamCount);
-                stack[sp++] = virtTarget.Invoke(virtThis, virtArgArr);
+                var virtResult = virtMethod.Invoke(virtThis, virtArgArr);
+                if (virtMethod.ReturnType != typeof(void))
+                    stack[sp++] = virtResult;
                 return false;
             case VmOpcode.Newobj:
                 var ctor = module.ResolveMethod(ReadToken(bc, ref ip, tokens))!;

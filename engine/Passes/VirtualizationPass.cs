@@ -25,7 +25,8 @@ internal static class VirtualizationPassHelpers
 
 /// <summary>
 /// Virtualizes method IL to custom VM bytecode (Themida/VMProtect-style).
-/// Enterprise tier only. Requires ShieldBinary.VmRuntime.dll deployed with the protected app.
+/// Enterprise tier only. Embeds VmRuntime.dll as a manifest resource and injects
+/// an AssemblyResolve hook so the protected binary is self-contained.
 /// </summary>
 public sealed class VirtualizationPass : IProtectionPass
 {
@@ -34,9 +35,11 @@ public sealed class VirtualizationPass : IProtectionPass
     public void Run(PipelineContext ctx, ModuleDef module)
     {
         var entryPoint = module.EntryPoint;
-        var vmRunRef = ResolveVmRun(module);
+        var (vmRunRef, vmPath) = ResolveVmRun(module);
         if (vmRunRef == null)
-            return; // VmRuntime not found - skip virtualization
+            return;
+
+        var virtualizedCount = 0;
 
         foreach (var type in module.GetAllTypes())
         {
@@ -73,6 +76,7 @@ public sealed class VirtualizationPass : IProtectionPass
                     var dispatchSchedule = BuildDispatchSchedule(bytecode.Length, ctx.Tier, ctx.Random, ctx.LowEntropy);
                     var dataType = InjectVmData(module, bytecode, tokens, opcodeDecodeMap, dispatchSchedule, ctx.Random, ctx.LowEntropy);
                     ReplaceWithVmStub(module, method, dataType, vmRunRef);
+                    virtualizedCount++;
                 }
                 catch
                 {
@@ -80,22 +84,26 @@ public sealed class VirtualizationPass : IProtectionPass
                 }
             }
         }
+
+        if (virtualizedCount > 0)
+        {
+            try { EmbedVmRuntime(module, vmPath!); } catch { }
+            try { InjectAssemblyResolveHook(module); } catch { }
+        }
     }
 
-    private static IMethod? ResolveVmRun(ModuleDef module)
+    private static (IMethod? vmRunRef, string? vmPath) ResolveVmRun(ModuleDef module)
     {
         try
         {
-            // Use BaseDirectory (Assembly.Location is empty for single-file published apps)
             var engineDir = string.IsNullOrEmpty(AppContext.BaseDirectory) ? "." : AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var vmPath = Path.Combine(engineDir, "ShieldBinary.VmRuntime.dll");
             if (!File.Exists(vmPath))
             {
-                // Try same directory as input
                 vmPath = Path.Combine(Path.GetDirectoryName(module.Location) ?? ".", "ShieldBinary.VmRuntime.dll");
             }
             if (!File.Exists(vmPath))
-                return null;
+                return (null, null);
 
             var asm = Assembly.LoadFrom(vmPath);
             var vmType = asm.GetType("ShieldBinary.VmRuntime.VmRunner");
@@ -116,14 +124,121 @@ public sealed class VirtualizationPass : IProtectionPass
                 },
                 null);
             if (runMethod == null)
-                return null;
+                return (null, null);
 
-            return module.Import(runMethod);
+            return (module.Import(runMethod), vmPath);
         }
         catch
         {
-            return null;
+            return (null, null);
         }
+    }
+
+    private static void EmbedVmRuntime(ModuleDef module, string vmPath)
+    {
+        var bytes = File.ReadAllBytes(vmPath);
+        module.Resources.Add(new EmbeddedResource("ShieldBinary.VmRuntime.dll", bytes, dnlib.DotNet.ManifestResourceAttributes.Private));
+    }
+
+    private static void InjectAssemblyResolveHook(ModuleDef module)
+    {
+        var assemblyTypeRef = module.Import(typeof(Assembly));
+        var resolveEventArgsTypeRef = module.Import(typeof(ResolveEventArgs));
+        var memStreamTypeRef = module.Import(typeof(System.IO.MemoryStream));
+        var streamTypeRef = module.Import(typeof(System.IO.Stream));
+
+        var resolverSig = MethodSig.CreateStatic(
+            new ClassSig(assemblyTypeRef),
+            module.CorLibTypes.Object,
+            new ClassSig(resolveEventArgsTypeRef)
+        );
+
+        var resolverMethod = new MethodDefUser(
+            "__VmR",
+            resolverSig,
+            dnlib.DotNet.MethodImplAttributes.IL,
+            dnlib.DotNet.MethodAttributes.Private | dnlib.DotNet.MethodAttributes.Static | dnlib.DotNet.MethodAttributes.HideBySig
+        );
+        module.GlobalType.Methods.Add(resolverMethod);
+
+        var resolverBody = new CilBody();
+        resolverMethod.Body = resolverBody;
+
+        var streamLocal = new Local(new ClassSig(streamTypeRef));
+        var msLocal = new Local(new ClassSig(memStreamTypeRef));
+        resolverBody.Variables.Add(streamLocal);
+        resolverBody.Variables.Add(msLocal);
+
+        var getNameMethod = module.Import(typeof(ResolveEventArgs).GetProperty("Name")!.GetGetMethod()!);
+        var startsWithMethod = module.Import(typeof(string).GetMethod("StartsWith", new[] { typeof(string) })!);
+        var getExecAsmMethod = module.Import(typeof(Assembly).GetMethod("GetExecutingAssembly", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null)!);
+        var getManifestMethod = module.Import(typeof(Assembly).GetMethod("GetManifestResourceStream", new[] { typeof(string) })!);
+        var loadAsmMethod = module.Import(typeof(Assembly).GetMethod("Load", new[] { typeof(byte[]) })!);
+        var memStreamCtorMethod = module.Import(typeof(System.IO.MemoryStream).GetConstructor(Type.EmptyTypes)!);
+        var copyToMethod = module.Import(typeof(System.IO.Stream).GetMethod("CopyTo", new[] { typeof(System.IO.Stream) })!);
+        var toArrayMethod = module.Import(typeof(System.IO.MemoryStream).GetMethod("ToArray")!);
+
+        var retNullIns = Instruction.Create(OpCodes.Ldnull);
+        var retIns = Instruction.Create(OpCodes.Ret);
+
+        var ins = resolverBody.Instructions;
+        // Check if args.Name starts with "ShieldBinary.VmRuntime"
+        ins.Add(Instruction.Create(OpCodes.Ldarg_1));
+        ins.Add(Instruction.Create(OpCodes.Callvirt, getNameMethod));
+        ins.Add(Instruction.Create(OpCodes.Ldstr, "ShieldBinary.VmRuntime"));
+        ins.Add(Instruction.Create(OpCodes.Callvirt, startsWithMethod));
+        ins.Add(Instruction.Create(OpCodes.Brfalse_S, retNullIns));
+        // Load the embedded DLL from manifest resources
+        ins.Add(Instruction.Create(OpCodes.Call, getExecAsmMethod));
+        ins.Add(Instruction.Create(OpCodes.Ldstr, "ShieldBinary.VmRuntime.dll"));
+        ins.Add(Instruction.Create(OpCodes.Callvirt, getManifestMethod));
+        ins.Add(Instruction.Create(OpCodes.Stloc, streamLocal));
+        ins.Add(Instruction.Create(OpCodes.Ldloc, streamLocal));
+        ins.Add(Instruction.Create(OpCodes.Brfalse_S, retNullIns));
+        // Copy to MemoryStream and load as Assembly
+        ins.Add(Instruction.Create(OpCodes.Newobj, memStreamCtorMethod));
+        ins.Add(Instruction.Create(OpCodes.Stloc, msLocal));
+        ins.Add(Instruction.Create(OpCodes.Ldloc, streamLocal));
+        ins.Add(Instruction.Create(OpCodes.Ldloc, msLocal));
+        ins.Add(Instruction.Create(OpCodes.Callvirt, copyToMethod));
+        ins.Add(Instruction.Create(OpCodes.Ldloc, msLocal));
+        ins.Add(Instruction.Create(OpCodes.Callvirt, toArrayMethod));
+        ins.Add(Instruction.Create(OpCodes.Call, loadAsmMethod));
+        ins.Add(Instruction.Create(OpCodes.Ret));
+        ins.Add(retNullIns);
+        ins.Add(retIns);
+
+        // Register the resolver in the global type's .cctor
+        var getCurrentDomainMethod = module.Import(typeof(AppDomain).GetProperty("CurrentDomain")!.GetGetMethod()!);
+        var addResolveMethod = module.Import(typeof(AppDomain).GetEvent("AssemblyResolve")!.GetAddMethod()!);
+        var resolveHandlerCtor = module.Import(typeof(ResolveEventHandler).GetConstructor(new[] { typeof(object), typeof(IntPtr) })!);
+
+        var globalCctor = module.GlobalType.Methods.FirstOrDefault(m => m.IsStaticConstructor);
+        if (globalCctor == null)
+        {
+            globalCctor = new MethodDefUser(
+                ".cctor",
+                MethodSig.CreateStatic(module.CorLibTypes.Void),
+                dnlib.DotNet.MethodImplAttributes.IL,
+                dnlib.DotNet.MethodAttributes.Private | dnlib.DotNet.MethodAttributes.Static |
+                dnlib.DotNet.MethodAttributes.SpecialName | dnlib.DotNet.MethodAttributes.RTSpecialName
+            );
+            module.GlobalType.Methods.Add(globalCctor);
+            globalCctor.Body = new CilBody();
+            globalCctor.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        }
+
+        var hookIns = new List<Instruction>
+        {
+            Instruction.Create(OpCodes.Call, getCurrentDomainMethod),
+            Instruction.Create(OpCodes.Ldnull),
+            Instruction.Create(OpCodes.Ldftn, resolverMethod),
+            Instruction.Create(OpCodes.Newobj, resolveHandlerCtor),
+            Instruction.Create(OpCodes.Callvirt, addResolveMethod),
+        };
+
+        for (var i = hookIns.Count - 1; i >= 0; i--)
+            globalCctor.Body.Instructions.Insert(0, hookIns[i]);
     }
 
     private static int[]? TokenTableToIntArray(object[] tokenTable)
@@ -165,13 +280,11 @@ public sealed class VirtualizationPass : IProtectionPass
         dataType.Fields.Add(opField);
         dataType.Fields.Add(scheduleField);
 
-        // Static cctor to initialize fields
         var cctor = new MethodDefUser(".cctor", MethodSig.CreateStatic(module.CorLibTypes.Void), dnlib.DotNet.MethodImplAttributes.IL, dnlib.DotNet.MethodAttributes.Private | dnlib.DotNet.MethodAttributes.Static | dnlib.DotNet.MethodAttributes.SpecialName | dnlib.DotNet.MethodAttributes.RTSpecialName);
         dataType.Methods.Add(cctor);
         var cctorBody = new CilBody();
         cctor.Body = cctorBody;
 
-        // Emit: B = bytecode, T = tokens
         EmitByteArrayInit(cctorBody, module, bcField, bytecode);
         EmitIntArrayInit(cctorBody, module, tokField, tokens);
         EmitByteArrayInit(cctorBody, module, opField, opcodeDecodeMap);

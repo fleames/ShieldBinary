@@ -57,22 +57,21 @@ public sealed class ControlFlowFlatteningPass : IProtectionPass
         if (instructions.Count < 3)
             return;
 
+        var (blocks, instrToBlock) = SplitIntoBlocks(instructions);
+        if (blocks.Count < 2)
+            return;
+
         var stateVar = new Local(method.Module.CorLibTypes.Int32);
         body.Variables.Add(stateVar);
 
         var dispatcher = Instruction.Create(OpCodes.Nop);
         var switchIns = Instruction.Create(OpCodes.Switch, Array.Empty<Instruction>());
 
-        var blocks = SplitIntoBlocks(instructions);
-        if (blocks.Count < 2)
-            return;
-
         var targets = new List<Instruction>();
         var newIns = new List<Instruction>();
 
         if (ctx.PolymorphicMode)
         {
-            // Obfuscated zero-init for dispatcher state to vary emitted IL shape.
             var mask = ctx.Random.Next(1, int.MaxValue);
             newIns.Add(Instruction.Create(OpCodes.Ldc_I4, mask));
             newIns.Add(Instruction.Create(OpCodes.Ldc_I4, mask));
@@ -85,16 +84,29 @@ public sealed class ControlFlowFlatteningPass : IProtectionPass
         {
             var block = blocks[i];
             targets.Add(block[0]);
+
+            // Determine what state to set at end of this block.
+            // If the last instruction is an unconditional Br with a known target block, use that.
+            var lastIns = block[block.Count - 1];
+            var isTerminalBr = (lastIns.OpCode == OpCodes.Br || lastIns.OpCode == OpCodes.Br_S)
+                               && lastIns.Operand is Instruction brTarget
+                               && instrToBlock.TryGetValue(brTarget, out _);
+            var nextState = i + 1;
+            if (isTerminalBr && instrToBlock.TryGetValue((Instruction)lastIns.Operand, out var brIdx))
+                nextState = brIdx;
+
             foreach (var ins in block)
             {
-                if (ins.OpCode == OpCodes.Br || ins.OpCode == OpCodes.Br_S ||
-                    ins.OpCode == OpCodes.Beq || ins.OpCode == OpCodes.Bne_Un)
+                // Drop unconditional branches — the state machine replaces them.
+                if (ins.OpCode == OpCodes.Br || ins.OpCode == OpCodes.Br_S)
                     continue;
                 newIns.Add(ins);
             }
+
+            // Non-final blocks: set next state and loop back to dispatcher.
             if (i < blocks.Count - 1)
             {
-                newIns.Add(Instruction.Create(OpCodes.Ldc_I4, i + 1));
+                newIns.Add(Instruction.Create(OpCodes.Ldc_I4, nextState));
                 newIns.Add(Instruction.Create(OpCodes.Stloc, stateVar));
                 newIns.Add(Instruction.Create(OpCodes.Br, dispatcher));
             }
@@ -111,9 +123,10 @@ public sealed class ControlFlowFlatteningPass : IProtectionPass
             body.Instructions.Add(ins);
     }
 
-    private static List<List<Instruction>> SplitIntoBlocks(List<Instruction> instructions)
+    private static (List<List<Instruction>> blocks, Dictionary<Instruction, int> instrToBlock) SplitIntoBlocks(List<Instruction> instructions)
     {
         var blocks = new List<List<Instruction>>();
+        var instrToBlock = new Dictionary<Instruction, int>(ReferenceEqualityComparer.Instance);
         var current = new List<Instruction>();
         foreach (var ins in instructions)
         {
@@ -129,6 +142,9 @@ public sealed class ControlFlowFlatteningPass : IProtectionPass
         }
         if (current.Count > 0)
             blocks.Add(current);
-        return blocks;
+        // Map every first instruction in each block to that block's index.
+        for (var i = 0; i < blocks.Count; i++)
+            instrToBlock[blocks[i][0]] = i;
+        return (blocks, instrToBlock);
     }
 }
