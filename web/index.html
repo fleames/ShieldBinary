@@ -6,30 +6,95 @@
 
     <!-- Primary meta -->
     <title>GhostBinary — Binary Protection Platform</title>
-    <meta name="description" content="Protect .NET and Windows executables from reverse engineering, cracking, and malware analysis. VM-based obfuscation, anti-debug, anti-tamper, and CI/CD integration — free during public beta." />
-    <meta name="keywords" content="binary protection, .NET obfuscation, PE packer, IL virtualization, anti-debug, anti-tamper, binary hardening, reverse engineering protection" />
+    <meta name="description" content="Protect .NET and Windows apps from reverse engineering. VM obfuscation, anti-debug, anti-tamper, name mangling, CI/CD integration — free public beta." />
+    <meta name="keywords" content="binary protection, .NET obfuscation, PE packer, IL virtualization, anti-debug, anti-tamper, binary hardening, reverse engineering protection, code obfuscation, .NET security, assembly protection, software licensing" />
     <meta name="author" content="GhostBinary" />
     <meta name="theme-color" content="#030609" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Canonical -->
+    <link rel="canonical" href="https://ghostbinary.com/" />
 
     <!-- Favicon — data URI bypasses browser favicon cache entirely -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzBjMWEzNCIvPgogIDxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSIzMCIgaGVpZ2h0PSIzMCIgcng9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzUwOTBmZiIgc3Ryb2tlLXdpZHRoPSIxIiBzdHJva2Utb3BhY2l0eT0iMC41NSIvPgogIDxwYXRoIGQ9Ik0xNiA3IEwyMiAxMCBMMjIgMTYgQzIyIDIwIDE5IDIyLjggMTYgMjQuMiBDMTMgMjIuOCAxMCAyMCAxMCAxNiBMMTAgMTAgWiIKICAgICAgICBmaWxsPSJub25lIiBzdHJva2U9IiM1MDkwZmYiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2Utb3BhY2l0eT0iMC45IiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPHRleHQgeD0iMTYiIHk9IjIxLjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiCiAgICAgICAgZmlsbD0iIzdhYjBmZiIKICAgICAgICBmb250LWZhbWlseT0ic3lzdGVtLXVpLC1hcHBsZS1zeXN0ZW0sc2Fucy1zZXJpZiIKICAgICAgICBmb250LXdlaWdodD0iODAwIiBmb250LXNpemU9IjkuNSI+RzwvdGV4dD4KPC9zdmc+Cg==" />
     <link rel="alternate icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.json" />
 
-    <!-- Open Graph -->
+    <!-- Open Graph (replace og:image value with a PNG URL once you export og-image.svg as PNG) -->
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://ghostbinary.com/" />
+    <meta property="og:site_name" content="GhostBinary" />
     <meta property="og:title" content="GhostBinary — Binary Protection Platform" />
     <meta property="og:description" content="Stop reverse engineers cold. Protect .NET and Windows apps from cracking, tampering, and malware analysis. One-click cloud pipeline, free during beta." />
     <meta property="og:locale" content="en_US" />
 
     <!-- Twitter / X -->
     <meta name="twitter:card" content="summary" />
+    <meta name="twitter:site" content="@ghostbinary" />
     <meta name="twitter:title" content="GhostBinary — Binary Protection Platform" />
     <meta name="twitter:description" content="Stop reverse engineers cold. VM obfuscation, anti-debug, anti-tamper, and CI/CD integration — free during public beta." />
 
     <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+    <!-- Structured data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://ghostbinary.com/#organization",
+          "name": "GhostBinary",
+          "url": "https://ghostbinary.com/",
+          "description": "Binary protection platform for .NET and Windows executables."
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://ghostbinary.com/#website",
+          "url": "https://ghostbinary.com/",
+          "name": "GhostBinary",
+          "publisher": { "@id": "https://ghostbinary.com/#organization" }
+        },
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://ghostbinary.com/#app",
+          "name": "GhostBinary",
+          "url": "https://ghostbinary.com/",
+          "applicationCategory": "SecurityApplication",
+          "operatingSystem": "Windows",
+          "description": "Protect .NET and Windows executables from reverse engineering, cracking, and tampering. VM-based obfuscation, control-flow flattening, anti-debug, anti-tamper, and CI/CD pipeline integration.",
+          "publisher": { "@id": "https://ghostbinary.com/#organization" },
+          "offers": [
+            {
+              "@type": "Offer",
+              "name": "Basic",
+              "price": "9.00",
+              "priceCurrency": "USD",
+              "description": "String encryption, IL virtualization, AES-GCM packing."
+            },
+            {
+              "@type": "Offer",
+              "name": "Pro",
+              "price": "39.00",
+              "priceCurrency": "USD",
+              "description": "Anti-ILDASM, constant encoding, opaque predicates."
+            },
+            {
+              "@type": "Offer",
+              "name": "Enterprise",
+              "price": "149.00",
+              "priceCurrency": "USD",
+              "description": "Name obfuscation, control-flow flattening, anti-debug, anti-tamper."
+            }
+          ]
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>

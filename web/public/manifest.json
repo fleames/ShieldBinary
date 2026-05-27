@@ -1,0 +1,19 @@
+{
+  "name": "GhostBinary",
+  "short_name": "GhostBinary",
+  "description": "Binary protection platform for .NET and Windows executables.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#030609",
+  "theme_color": "#030609",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}
