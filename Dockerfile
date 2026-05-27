@@ -33,6 +33,7 @@ COPY --from=frontend-builder /build/dist /app/web
 
 ENV SHIELD_ENGINE_PATH=/app/engine/shieldbinary-engine
 ENV SHIELD_WEB_ROOT=/app/web
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 EXPOSE 8080
 
 # Default: run API. Use `docker run ... /app/worker` for worker.
