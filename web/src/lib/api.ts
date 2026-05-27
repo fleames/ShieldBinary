@@ -1,7 +1,3 @@
-/**
- * API helper with retry for transient failures and clearer error messages.
- */
-
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
 
@@ -24,23 +20,14 @@ export async function apiFetch(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/60f530a7-18e0-420c-9616-89f6ce8bf38b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'baseline',hypothesisId:'H5',location:'web/src/lib/api.ts:30',message:'apiFetch request start',data:{url,attempt,retries,method:init?.method ?? 'GET'},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const res = await fetch(url, init);
       lastRes = res;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/60f530a7-18e0-420c-9616-89f6ce8bf38b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'baseline',hypothesisId:'H5',location:'web/src/lib/api.ts:34',message:'apiFetch response received',data:{url,attempt,status:res.status,ok:res.ok},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
 
       if (res.ok || !isRetryable(res.status)) {
         return res;
       }
       lastErr = new Error(`HTTP ${res.status}`);
     } catch (e) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/60f530a7-18e0-420c-9616-89f6ce8bf38b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'baseline',hypothesisId:'H5',location:'web/src/lib/api.ts:43',message:'apiFetch request threw',data:{url,attempt,error:e instanceof Error ? e.message : String(e)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       lastErr = e;
       lastRes = null;
     }

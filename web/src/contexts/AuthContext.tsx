@@ -36,9 +36,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchMe = useCallback(async () => {
     const res = await authFetch(`${API}/auth/me`);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/60f530a7-18e0-420c-9616-89f6ce8bf38b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'baseline',hypothesisId:'H5',location:'web/src/contexts/AuthContext.tsx:40',message:'fetchMe completed',data:{status:res.status,ok:res.ok,hadToken:!!token},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (res.ok) {
       const d = await res.json();
       setUser(d.user ?? null);

@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/shieldbinary/backend/internal/config"
 	"github.com/shieldbinary/backend/internal/nativepacker"
@@ -98,14 +96,6 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 		zap.String("tier", job.Tier),
 		zap.String("binary_type", job.BinaryType),
 	)
-	// #region agent log
-	debugLog("baseline", "H4", "internal/worker/worker.go:70", "worker processing job", map[string]interface{}{
-		"jobId":      job.ID,
-		"tier":       job.Tier,
-		"binaryType": job.BinaryType,
-		"inputKey":   job.InputKey,
-	})
-	// #endregion
 
 	workDir, err := os.MkdirTemp("", "shieldbinary-"+job.ID+"-*")
 	if err != nil {
@@ -149,21 +139,9 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 	// Detect .NET vs native PE and route to appropriate engine
 	isDotNet, err := peutil.IsDotNet(inputPath)
 	if err != nil {
-		// #region agent log
-		debugLog("baseline", "H4", "internal/worker/worker.go:119", "dotnet detection failed", map[string]interface{}{
-			"jobId": job.ID,
-			"error": err.Error(),
-		})
-		// #endregion
 		w.failJob(ctx, job.ID, "Failed to detect binary type: "+err.Error())
 		return
 	}
-	// #region agent log
-	debugLog("baseline", "H4", "internal/worker/worker.go:126", "dotnet detection result", map[string]interface{}{
-		"jobId":    job.ID,
-		"isDotNet": isDotNet,
-	})
-	// #endregion
 
 	detectedType := "native"
 	var obs *engineObservability
@@ -443,23 +421,6 @@ func (w *Worker) failJob(ctx context.Context, jobID string, errMsg interface{}) 
 		_ = w.queue.SetRetrySuggestions(ctx, jobID, buildRetrySuggestions(job, msg))
 	}
 	w.logger.Error("job failed", zap.String("job_id", jobID), zap.String("error", msg))
-}
-
-func debugLog(runID, hypothesisID, location, message string, data map[string]interface{}) {
-	f, err := os.OpenFile("c:\\Users\\Ryzen3D\\BinaryProtect\\.cursor\\debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	_ = json.NewEncoder(f).Encode(map[string]interface{}{
-		"id":           fmt.Sprintf("log_%d_workerproc", time.Now().UnixNano()),
-		"timestamp":    time.Now().UnixMilli(),
-		"runId":        runID,
-		"hypothesisId": hypothesisID,
-		"location":     location,
-		"message":      message,
-		"data":         data,
-	})
 }
 
 func estimateSizeImpact(inputPath, outputPath string, obs *engineObservability) *queue.SizeImpact {
