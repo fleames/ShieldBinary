@@ -507,6 +507,44 @@ func filterRetryProtections(in []string) []string {
 	return out
 }
 
+// handleDebugJob returns a structured crash/diagnostic report for a job.
+func (s *Server) handleDebugJob(c *gin.Context) {
+	jobID := c.Param("id")
+	if jobID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job_id required"})
+		return
+	}
+	job, err := s.queue.GetJob(c.Request.Context(), jobID)
+	if err != nil || job == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	userID, _ := c.Get("user_id")
+	if job.UserID != userID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+
+	var failedPasses []queue.PassMetric
+	for _, p := range job.PassMetrics {
+		if !p.Success {
+			failedPasses = append(failedPasses, p)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"job_id":            job.ID,
+		"status":            job.Status,
+		"tier":              job.Tier,
+		"binary_type":       job.BinaryType,
+		"protections":       job.Protections,
+		"engine_error":      job.Error,
+		"compat_report":     job.CompatibilityReport,
+		"failed_passes":     failedPasses,
+		"retry_suggestions": job.RetrySuggestions,
+	})
+}
+
 // handleDeleteJob removes a job and its storage artifacts.
 func (s *Server) handleDeleteJob(c *gin.Context) {
 	jobID := c.Param("id")

@@ -24,7 +24,7 @@ export default function JobDetailPanel({ job, intelStatus, vtUrl }: Props) {
   const maxDur = passes.length ? Math.max(...passes.map((p) => p.duration_ms), 1) : 1;
 
   const compat = job.compatibility_report;
-  const compatOk = compat?.status === 'pass' || compat?.status === 'ok';
+  const compatOk = compat?.status === 'compatible';
 
   const sizeIn = job.size_impact?.input_bytes;
   const sizeOut = job.size_impact?.output_bytes;
@@ -96,12 +96,15 @@ export default function JobDetailPanel({ job, intelStatus, vtUrl }: Props) {
             <div className="dash-detail__stat">
               <span className="dash-detail__stat-label">Compatibility</span>
               <span className="dash-detail__stat-value">
-                <span style={{ color: compatOk ? 'var(--success)' : 'var(--error)', marginRight: '0.3rem' }}>
+                <span style={{
+                  color: compatOk ? 'var(--success)' : compat.status === 'warning' ? 'var(--warning)' : 'var(--error)',
+                  marginRight: '0.3rem',
+                }}>
                   {compatOk ? '✓' : '✗'}
                 </span>
                 {compat.status}
                 {compat.mode && ` · ${compat.mode}`}
-                {typeof compat.exit_code === 'number' && ` · exit ${compat.exit_code}`}
+                {typeof compat.exit_code === 'number' && compat.exit_code !== 0 && ` · exit ${compat.exit_code}`}
                 {compat.timed_out && ' · timed out'}
               </span>
             </div>
@@ -204,8 +207,53 @@ export default function JobDetailPanel({ job, intelStatus, vtUrl }: Props) {
         </div>
       )}
 
+      {/* ── Crash diagnostics ── */}
+      {(job.status === 'failed' || compat?.status === 'incompatible') &&
+        (job.error || compat?.stderr_snippet || compat?.stdout_snippet) && (
+        <div className="dash-detail__section">
+          <div className="dash-detail__section-title dash-detail__section-title--error">
+            Crash diagnostics
+          </div>
+          {job.error && (
+            <div className="dash-diag">
+              <div className="dash-diag__label">Engine error</div>
+              <pre className="dash-diag__code">{job.error}</pre>
+            </div>
+          )}
+          {compat?.stderr_snippet && (
+            <div className="dash-diag">
+              <div className="dash-diag__label">Stderr</div>
+              <pre className="dash-diag__code">{compat.stderr_snippet}</pre>
+            </div>
+          )}
+          {compat?.stdout_snippet && (
+            <div className="dash-diag">
+              <div className="dash-diag__label">Stdout</div>
+              <pre className="dash-diag__code">{compat.stdout_snippet}</pre>
+            </div>
+          )}
+          <button
+            className="dash-diag__copy"
+            onClick={() => {
+              const info = {
+                job_id: job.job_id,
+                status: job.status,
+                tier: job.tier,
+                binary_type: job.binary_type,
+                engine_error: job.error ?? null,
+                compat_report: compat ?? null,
+                failed_passes: job.pass_metrics?.filter((p) => !p.success) ?? [],
+              };
+              navigator.clipboard.writeText(JSON.stringify(info, null, 2));
+            }}
+          >
+            Copy debug JSON
+          </button>
+        </div>
+      )}
+
       {/* ── Notes from compat report ── */}
-      {compat?.notes && (
+      {compat?.notes && compat.status !== 'incompatible' && (
         <div className="dash-detail__section">
           <div className="dash-detail__section-title">Notes</div>
           <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>

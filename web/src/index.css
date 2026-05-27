@@ -1267,6 +1267,57 @@ a:hover {
   margin-bottom: 0.6rem;
 }
 
+.dash-detail__section-title--error {
+  color: var(--error);
+}
+
+/* ── Crash diagnostics ── */
+.dash-diag {
+  margin-top: 0.55rem;
+}
+
+.dash-diag__label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+
+.dash-diag__code {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: rgba(255, 61, 85, 0.04);
+  border: 1px solid rgba(255, 61, 85, 0.14);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  margin: 0;
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.dash-diag__copy {
+  margin-top: 0.65rem;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--blue);
+  background: rgba(80, 144, 255, 0.06);
+  border: 1px solid rgba(80, 144, 255, 0.2);
+  border-radius: 5px;
+  padding: 0.28rem 0.7rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.dash-diag__copy:hover {
+  background: rgba(80, 144, 255, 0.13);
+}
+
 /* ── Pass breakdown ── */
 .dash-pass-list {
   display: flex;

@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -70,10 +71,10 @@ func (w *Worker) runCompatibilityCheck(ctx context.Context, outputPath, binaryTy
 	}
 	if err != nil {
 		report.Status = "incompatible"
-		report.Notes = "process failed during compatibility check"
 		if cmd.ProcessState != nil {
 			report.ExitCode = cmd.ProcessState.ExitCode()
 		}
+		report.Notes = compatCrashNotes(report.ExitCode, stderrS, stdoutS)
 		return report
 	}
 	if cmd.ProcessState != nil {
@@ -82,6 +83,25 @@ func (w *Worker) runCompatibilityCheck(ctx context.Context, outputPath, binaryTy
 	report.Status = "compatible"
 	report.Notes = "containerized launch check passed"
 	return report
+}
+
+func compatCrashNotes(exitCode int, stderr, stdout string) string {
+	snippet := strings.TrimSpace(stderr)
+	if snippet == "" {
+		snippet = strings.TrimSpace(stdout)
+	}
+	firstLine := snippet
+	if nl := strings.IndexByte(snippet, '\n'); nl > 0 {
+		firstLine = snippet[:nl]
+	}
+	firstLine = strings.TrimSpace(firstLine)
+	if len(firstLine) > 120 {
+		firstLine = firstLine[:120] + "…"
+	}
+	if firstLine != "" {
+		return fmt.Sprintf("exit code %d: %s", exitCode, firstLine)
+	}
+	return fmt.Sprintf("process exited with code %d", exitCode)
 }
 
 func clipSnippet(s string, max int) string {
@@ -132,7 +152,7 @@ func runNativeCompatibilityProbe(ctx context.Context, outputPath string, timeout
 		}
 		if err != nil {
 			report.Status = "incompatible"
-			report.Notes = "native process exited with failure during probe"
+			report.Notes = compatCrashNotes(report.ExitCode, report.StderrSnippet, report.StdoutSnippet)
 			return report
 		}
 		report.Status = "compatible"

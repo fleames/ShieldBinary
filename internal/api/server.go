@@ -201,6 +201,7 @@ func (s *Server) routes() {
 			protected.GET("/jobs/:id", s.handleGetJob)
 			protected.DELETE("/jobs/:id", s.handleDeleteJob)
 			protected.GET("/jobs/:id/download", s.handleDownloadJob)
+			protected.GET("/jobs/:id/debug", s.handleDebugJob)
 			protected.POST("/jobs/:id/threat-intel/submit", s.handleThreatIntelSubmit)
 			protected.GET("/jobs/:id/threat-intel", s.handleThreatIntelStatus)
 			protected.GET("/threat-intel/flags", s.handleThreatIntelFlags)
