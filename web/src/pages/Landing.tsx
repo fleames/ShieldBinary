@@ -111,7 +111,7 @@ export default function Landing() {
           margin: '0 auto 2rem',
           lineHeight: 1.7,
         }}>
-          ShieldBinary Nexus applies obfuscation, encryption, and anti-analysis techniques
+          GhostBinary applies obfuscation, encryption, and anti-analysis techniques
           to your .NET assemblies and native PE files — no setup required.
         </p>
         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>

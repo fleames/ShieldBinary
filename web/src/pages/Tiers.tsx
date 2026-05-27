@@ -81,7 +81,7 @@ export default function Tiers() {
     <div style={{ maxWidth: 980, margin: '0 auto' }}>
       <h1 className="page-title">Tiers, Features, and Techniques</h1>
       <p className="page-subtitle">
-        Complete overview of what each ShieldBinary tier includes. Items marked opt-in require explicit engine flags.
+        Complete overview of what each GhostBinary tier includes. Items marked opt-in require explicit engine flags.
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.9rem' }}>

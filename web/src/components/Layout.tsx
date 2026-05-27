@@ -22,7 +22,7 @@ export default function Layout({ children, hideUser }: LayoutProps) {
         <div className="sb-header__inner">
           <div className="sb-header__left">
             <Link to="/" className="sb-brand">
-              ShieldBinary <span className="sb-brand__glow">Nexus</span>
+              Ghost<span className="sb-brand__glow">Binary</span>
             </Link>
             {showUser && (
               <NavLink to="/dashboard" className={({ isActive }) => `sb-nav-link${isActive ? ' active' : ''}`}>
