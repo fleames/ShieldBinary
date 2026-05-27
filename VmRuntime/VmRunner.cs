@@ -53,37 +53,75 @@ public static class VmRunner
         var dispatchUnmap2 = InvertMap(dispatchMap2);
         var handlerTable = BuildHandlerTable();
 
-        while (ip < bc.Length)
+        try
         {
-            var encoded = bc[ip++];
-            var decoded = (opcodeDecodeMap != null && opcodeDecodeMap.Length == 256) ? opcodeDecodeMap[encoded] : encoded;
-            var op = (VmOpcode)decoded;
-            var dispatchEngine = GetDispatchEngine(dispatchSchedule, ip);
-            if (dispatchEngine == 1)
+            while (ip < bc.Length)
             {
-                var k = dispatchMap[(byte)op];
-                op = (VmOpcode)dispatchUnmap[k];
+                var encoded = bc[ip++];
+                var decoded = (opcodeDecodeMap != null && opcodeDecodeMap.Length == 256) ? opcodeDecodeMap[encoded] : encoded;
+                var op = (VmOpcode)decoded;
+                var dispatchEngine = GetDispatchEngine(dispatchSchedule, ip);
+                if (dispatchEngine == 1)
+                {
+                    var k = dispatchMap[(byte)op];
+                    op = (VmOpcode)dispatchUnmap[k];
+                }
+                else if (dispatchEngine == 2)
+                {
+                    var k1 = dispatchMap[(byte)op];
+                    var k2 = dispatchMap2[k1];
+                    op = (VmOpcode)dispatchUnmap2[k2];
+                }
+                else if (dispatchEngine == 3)
+                {
+                    var handler = handlerTable[(byte)op];
+                    if (handler == null)
+                        throw new InvalidProgramException($"Unknown VM opcode: {op}");
+                    if (handler(bc, tokens, args, locals, stack, ref sp, ref ip, module, out var tableResult))
+                        return tableResult;
+                    continue;
+                }
+                if (ExecuteOpcode(op, bc, tokens, args, locals, stack, ref sp, ref ip, module, out var directResult))
+                    return directResult;
             }
-            else if (dispatchEngine == 2)
-            {
-                var k1 = dispatchMap[(byte)op];
-                var k2 = dispatchMap2[k1];
-                op = (VmOpcode)dispatchUnmap2[k2];
-            }
-            else if (dispatchEngine == 3)
-            {
-                var handler = handlerTable[(byte)op];
-                if (handler == null)
-                    throw new InvalidProgramException($"Unknown VM opcode: {op}");
-                if (handler(bc, tokens, args, locals, stack, ref sp, ref ip, module, out var tableResult))
-                    return tableResult;
-                continue;
-            }
-            if (ExecuteOpcode(op, bc, tokens, args, locals, stack, ref sp, ref ip, module, out var directResult))
-                return directResult;
+        }
+        catch (Exception ex)
+        {
+            WriteCrashReport(ex, ip, sp, bc, stack, opcodeDecodeMap);
+            throw;
         }
 
         return sp > 0 ? stack[sp - 1] : null;
+    }
+
+    private static void WriteCrashReport(Exception ex, int ip, int sp, byte[] bc, object[] stack, byte[] opcodeDecodeMap)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("=== ShieldBinary VmRuntime Crash ===");
+            sb.AppendLine($"Time:      {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+            sb.AppendLine($"Exception: {ex.GetType().FullName}: {ex.Message}");
+            sb.AppendLine($"IP:        {ip} / {bc?.Length ?? 0}");
+            sb.AppendLine($"SP:        {sp}");
+            if (bc != null && ip > 0 && ip <= bc.Length)
+            {
+                var lastByte = bc[Math.Max(0, ip - 1)];
+                var decoded = (opcodeDecodeMap?.Length == 256) ? opcodeDecodeMap[lastByte] : lastByte;
+                sb.AppendLine($"Last byte: 0x{lastByte:X2} → opcode 0x{decoded:X2} ({(VmOpcode)decoded})");
+            }
+            for (var i = 0; i < Math.Min(sp, stack?.Length ?? 0); i++)
+                sb.AppendLine($"  stack[{i}]: {stack![i]?.GetType().Name ?? "null"} = {stack[i]}");
+            sb.AppendLine();
+            sb.AppendLine(ex.StackTrace);
+            sb.AppendLine("=====================");
+
+            var report = sb.ToString();
+            Console.Error.WriteLine(report);
+            var dir = AppDomain.CurrentDomain.BaseDirectory;
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "vmruntime_crash.txt"), report);
+        }
+        catch { }
     }
 
     private static VmOpHandler[] BuildHandlerTable()

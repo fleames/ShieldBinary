@@ -208,10 +208,97 @@ public sealed class VirtualizationPass : IProtectionPass
         ins.Add(retNullIns);
         ins.Add(retIns);
 
-        // Register the resolver in the global type's .cctor
+        // Build global crash handler: __EH(object, UnhandledExceptionEventArgs)
+        var unhandledArgsTypeRef = module.Import(typeof(UnhandledExceptionEventArgs));
+        var unhandledHandlerTypeRef = module.Import(typeof(UnhandledExceptionEventHandler));
+
+        var crashHandlerSig = MethodSig.CreateStatic(
+            module.CorLibTypes.Void,
+            module.CorLibTypes.Object,
+            new ClassSig(unhandledArgsTypeRef)
+        );
+        var crashHandlerMethod = new MethodDefUser(
+            "__EH",
+            crashHandlerSig,
+            dnlib.DotNet.MethodImplAttributes.IL,
+            dnlib.DotNet.MethodAttributes.Private | dnlib.DotNet.MethodAttributes.Static | dnlib.DotNet.MethodAttributes.HideBySig
+        );
+        module.GlobalType.Methods.Add(crashHandlerMethod);
+
+        var crashBody = new CilBody();
+        crashHandlerMethod.Body = crashBody;
+        var msgLocal = new Local(module.CorLibTypes.String);
+        crashBody.Variables.Add(msgLocal);
+
+        var getExceptionObjectMethod = module.Import(typeof(UnhandledExceptionEventArgs).GetProperty("ExceptionObject")!.GetGetMethod()!);
+        var toStringMethod = module.Import(typeof(object).GetMethod("ToString", Type.EmptyTypes)!);
+        var concatMethod = module.Import(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) })!);
+        var getErrorMethod = module.Import(typeof(Console).GetProperty("Error")!.GetGetMethod()!);
+        var writeLineMethod = module.Import(typeof(System.IO.TextWriter).GetMethod("WriteLine", new[] { typeof(string) })!);
+        var appendAllTextMethod = module.Import(typeof(System.IO.File).GetMethod("AppendAllText", new[] { typeof(string), typeof(string) })!);
+        var getBaseDirMethod = module.Import(typeof(AppDomain).GetProperty("BaseDirectory")!.GetGetMethod()!);
+        var getCurrentDomainForCrash = module.Import(typeof(AppDomain).GetProperty("CurrentDomain")!.GetGetMethod()!);
+        var pathCombineMethod = module.Import(typeof(System.IO.Path).GetMethod("Combine", new[] { typeof(string), typeof(string) })!);
+
+        // try block instructions
+        var tryNop = Instruction.Create(OpCodes.Nop);
+        var nullStrIns = Instruction.Create(OpCodes.Ldstr, "");
+        var concatDoneIns = Instruction.Create(OpCodes.Call, concatMethod);
+        var leaveIns = Instruction.Create(OpCodes.Leave_S, (Instruction)null!);
+        // catch body
+        var catchPop = Instruction.Create(OpCodes.Pop);
+        var finalRet = Instruction.Create(OpCodes.Ret);
+        leaveIns.Operand = finalRet;
+
+        var ci = crashBody.Instructions;
+        ci.Add(tryNop);
+        // e.ExceptionObject?.ToString() ?? ""
+        ci.Add(Instruction.Create(OpCodes.Ldarg_1));
+        ci.Add(Instruction.Create(OpCodes.Callvirt, getExceptionObjectMethod));
+        ci.Add(Instruction.Create(OpCodes.Dup));
+        ci.Add(Instruction.Create(OpCodes.Brfalse_S, nullStrIns));
+        ci.Add(Instruction.Create(OpCodes.Callvirt, toStringMethod));
+        ci.Add(Instruction.Create(OpCodes.Stloc, msgLocal));
+        var skipNullIns = Instruction.Create(OpCodes.Ldstr, "[ShieldBinary] ");
+        ci.Add(Instruction.Create(OpCodes.Br_S, skipNullIns));
+        ci.Add(nullStrIns);                                   // pop + ldstr ""
+        ci.Add(Instruction.Create(OpCodes.Pop));
+        ci.Add(Instruction.Create(OpCodes.Ldstr, ""));
+        ci.Add(Instruction.Create(OpCodes.Stloc, msgLocal));
+        ci.Add(skipNullIns);                                  // ldstr "[ShieldBinary] "
+        ci.Add(Instruction.Create(OpCodes.Ldloc, msgLocal));
+        ci.Add(concatDoneIns);                                // string.Concat("[ShieldBinary] ", msg)
+        ci.Add(Instruction.Create(OpCodes.Stloc, msgLocal));
+        // Console.Error.WriteLine(msg)
+        ci.Add(Instruction.Create(OpCodes.Call, getErrorMethod));
+        ci.Add(Instruction.Create(OpCodes.Ldloc, msgLocal));
+        ci.Add(Instruction.Create(OpCodes.Callvirt, writeLineMethod));
+        // File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash_report.txt"), msg)
+        ci.Add(Instruction.Create(OpCodes.Call, getCurrentDomainForCrash));
+        ci.Add(Instruction.Create(OpCodes.Callvirt, getBaseDirMethod));
+        ci.Add(Instruction.Create(OpCodes.Ldstr, "crash_report.txt"));
+        ci.Add(Instruction.Create(OpCodes.Call, pathCombineMethod));
+        ci.Add(Instruction.Create(OpCodes.Ldloc, msgLocal));
+        ci.Add(Instruction.Create(OpCodes.Call, appendAllTextMethod));
+        ci.Add(leaveIns);
+        ci.Add(catchPop);
+        ci.Add(finalRet);
+
+        crashBody.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
+        {
+            TryStart = tryNop,
+            TryEnd = catchPop,
+            HandlerStart = catchPop,
+            HandlerEnd = finalRet,
+            CatchType = module.Import(typeof(Exception)).ScopeType,
+        });
+
+        // Register both hooks in the global type's .cctor
         var getCurrentDomainMethod = module.Import(typeof(AppDomain).GetProperty("CurrentDomain")!.GetGetMethod()!);
         var addResolveMethod = module.Import(typeof(AppDomain).GetEvent("AssemblyResolve")!.GetAddMethod()!);
         var resolveHandlerCtor = module.Import(typeof(ResolveEventHandler).GetConstructor(new[] { typeof(object), typeof(IntPtr) })!);
+        var addUnhandledMethod = module.Import(typeof(AppDomain).GetEvent("UnhandledException")!.GetAddMethod()!);
+        var unhandledHandlerCtor = module.Import(typeof(UnhandledExceptionEventHandler).GetConstructor(new[] { typeof(object), typeof(IntPtr) })!);
 
         var globalCctor = module.GlobalType.Methods.FirstOrDefault(m => m.IsStaticConstructor);
         if (globalCctor == null)
@@ -230,11 +317,18 @@ public sealed class VirtualizationPass : IProtectionPass
 
         var hookIns = new List<Instruction>
         {
+            // AppDomain.CurrentDomain.AssemblyResolve += new ResolveEventHandler(__VmR)
             Instruction.Create(OpCodes.Call, getCurrentDomainMethod),
             Instruction.Create(OpCodes.Ldnull),
             Instruction.Create(OpCodes.Ldftn, resolverMethod),
             Instruction.Create(OpCodes.Newobj, resolveHandlerCtor),
             Instruction.Create(OpCodes.Callvirt, addResolveMethod),
+            // AppDomain.CurrentDomain.UnhandledException += new UnhandledExceptionEventHandler(__EH)
+            Instruction.Create(OpCodes.Call, getCurrentDomainMethod),
+            Instruction.Create(OpCodes.Ldnull),
+            Instruction.Create(OpCodes.Ldftn, crashHandlerMethod),
+            Instruction.Create(OpCodes.Newobj, unhandledHandlerCtor),
+            Instruction.Create(OpCodes.Callvirt, addUnhandledMethod),
         };
 
         for (var i = hookIns.Count - 1; i >= 0; i--)
