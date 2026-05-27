@@ -22,8 +22,8 @@ COPY web/ .
 RUN npm run build
 
 # Stage 4: Runtime
-FROM alpine:3.19
-RUN apk add --no-cache ca-certificates
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 COPY --from=go-builder /api /app/api
