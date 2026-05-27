@@ -10,6 +10,7 @@ export default function Layout({ children, hideUser }: LayoutProps) {
   const location = useLocation();
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register';
   const showUser = !hideUser && !isAuthPage && user;
+
   const handleLogout = () => {
     const settings = loadUserSettings();
     if (settings.confirmBeforeLogout && !window.confirm('Log out of your account now?')) return;
@@ -24,6 +25,7 @@ export default function Layout({ children, hideUser }: LayoutProps) {
             <Link to="/" className="sb-brand">
               Ghost<span className="sb-brand__glow">Binary</span>
             </Link>
+
             {showUser && (
               <NavLink to="/dashboard" className={({ isActive }) => `sb-nav-link${isActive ? ' active' : ''}`}>
                 Protect
@@ -44,14 +46,27 @@ export default function Layout({ children, hideUser }: LayoutProps) {
                 Settings
               </NavLink>
             )}
+
             <a href="/api/v1/docs" target="_blank" rel="noopener noreferrer" className="sb-nav-link">
-              API Docs
+              API
             </a>
+
             <Badge tone="accent">beta</Badge>
           </div>
+
           {showUser && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
-              <Badge tone="neutral">{user.email}</Badge>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <span style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.74rem',
+                color: 'var(--text-muted)',
+                maxWidth: 200,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {user.email}
+              </span>
               <Button variant="ghost" size="sm" onClick={handleLogout}>
                 Log out
               </Button>
@@ -59,6 +74,7 @@ export default function Layout({ children, hideUser }: LayoutProps) {
           )}
         </div>
       </header>
+
       <main className="app-main">
         {children ?? <Outlet />}
       </main>
