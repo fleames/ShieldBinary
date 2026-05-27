@@ -10,10 +10,12 @@ services:
       SHIELD_REDIS_ADDR: redis:6379
       SHIELD_ENGINE_PATH: /app/engine/shieldbinary-engine
       SHIELD_WEB_ROOT: /app/web
+      SHIELD_DATABASE_PATH: /app/data/shieldbinary.db
     env_file:
       - .env.prod
     volumes:
       - storage-data:/app/storage
+      - db-data:/app/data
     depends_on:
       - redis
 
@@ -41,3 +43,4 @@ services:
 volumes:
   redis-data:
   storage-data:
+  db-data:
