@@ -210,7 +210,6 @@ public sealed class VirtualizationPass : IProtectionPass
 
         // Build global crash handler: __EH(object, UnhandledExceptionEventArgs)
         var unhandledArgsTypeRef = module.Import(typeof(UnhandledExceptionEventArgs));
-        var unhandledHandlerTypeRef = module.Import(typeof(UnhandledExceptionEventHandler));
 
         var crashHandlerSig = MethodSig.CreateStatic(
             module.CorLibTypes.Void,
@@ -235,61 +234,54 @@ public sealed class VirtualizationPass : IProtectionPass
         var concatMethod = module.Import(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) })!);
         var getErrorMethod = module.Import(typeof(Console).GetProperty("Error")!.GetGetMethod()!);
         var writeLineMethod = module.Import(typeof(System.IO.TextWriter).GetMethod("WriteLine", new[] { typeof(string) })!);
-        var appendAllTextMethod = module.Import(typeof(System.IO.File).GetMethod("AppendAllText", new[] { typeof(string), typeof(string) })!);
-        var getBaseDirMethod = module.Import(typeof(AppDomain).GetProperty("BaseDirectory")!.GetGetMethod()!);
-        var getCurrentDomainForCrash = module.Import(typeof(AppDomain).GetProperty("CurrentDomain")!.GetGetMethod()!);
+        var getTempPathMethod = module.Import(typeof(System.IO.Path).GetMethod("GetTempPath", Type.EmptyTypes)!);
         var pathCombineMethod = module.Import(typeof(System.IO.Path).GetMethod("Combine", new[] { typeof(string), typeof(string) })!);
+        var appendAllTextMethod = module.Import(typeof(System.IO.File).GetMethod("AppendAllText", new[] { typeof(string), typeof(string) })!);
 
-        // try block instructions
+        // Sentinel instructions — create before building IL so forward refs work
         var tryNop = Instruction.Create(OpCodes.Nop);
-        var nullStrIns = Instruction.Create(OpCodes.Ldstr, "");
-        var concatDoneIns = Instruction.Create(OpCodes.Call, concatMethod);
-        var leaveIns = Instruction.Create(OpCodes.Leave_S, (Instruction)null!);
-        // catch body
+        var tryLeave = Instruction.Create(OpCodes.Leave_S, (Instruction)null!);
         var catchPop = Instruction.Create(OpCodes.Pop);
+        var catchLeave = Instruction.Create(OpCodes.Leave_S, (Instruction)null!);
         var finalRet = Instruction.Create(OpCodes.Ret);
-        leaveIns.Operand = finalRet;
+        tryLeave.Operand = finalRet;
+        catchLeave.Operand = finalRet;
 
+        // Try body: e.ExceptionObject.ToString() → msg → write stderr + temp file
         var ci = crashBody.Instructions;
         ci.Add(tryNop);
-        // e.ExceptionObject?.ToString() ?? ""
         ci.Add(Instruction.Create(OpCodes.Ldarg_1));
-        ci.Add(Instruction.Create(OpCodes.Callvirt, getExceptionObjectMethod));
-        ci.Add(Instruction.Create(OpCodes.Dup));
-        ci.Add(Instruction.Create(OpCodes.Brfalse_S, nullStrIns));
-        ci.Add(Instruction.Create(OpCodes.Callvirt, toStringMethod));
-        ci.Add(Instruction.Create(OpCodes.Stloc, msgLocal));
-        var skipNullIns = Instruction.Create(OpCodes.Ldstr, "[ShieldBinary] ");
-        ci.Add(Instruction.Create(OpCodes.Br_S, skipNullIns));
-        ci.Add(nullStrIns);                                   // pop + ldstr ""
-        ci.Add(Instruction.Create(OpCodes.Pop));
-        ci.Add(Instruction.Create(OpCodes.Ldstr, ""));
-        ci.Add(Instruction.Create(OpCodes.Stloc, msgLocal));
-        ci.Add(skipNullIns);                                  // ldstr "[ShieldBinary] "
+        ci.Add(Instruction.Create(OpCodes.Callvirt, getExceptionObjectMethod)); // [obj]
+        ci.Add(Instruction.Create(OpCodes.Callvirt, toStringMethod));           // [str]
+        ci.Add(Instruction.Create(OpCodes.Stloc, msgLocal));                    // [] msgLocal=str
+        ci.Add(Instruction.Create(OpCodes.Ldstr, "[ShieldBinary] "));
         ci.Add(Instruction.Create(OpCodes.Ldloc, msgLocal));
-        ci.Add(concatDoneIns);                                // string.Concat("[ShieldBinary] ", msg)
+        ci.Add(Instruction.Create(OpCodes.Call, concatMethod));                 // ["[ShieldBinary] " + str]
         ci.Add(Instruction.Create(OpCodes.Stloc, msgLocal));
         // Console.Error.WriteLine(msg)
-        ci.Add(Instruction.Create(OpCodes.Call, getErrorMethod));
+        ci.Add(Instruction.Create(OpCodes.Call, getErrorMethod));               // [TextWriter]
         ci.Add(Instruction.Create(OpCodes.Ldloc, msgLocal));
         ci.Add(Instruction.Create(OpCodes.Callvirt, writeLineMethod));
-        // File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash_report.txt"), msg)
-        ci.Add(Instruction.Create(OpCodes.Call, getCurrentDomainForCrash));
-        ci.Add(Instruction.Create(OpCodes.Callvirt, getBaseDirMethod));
-        ci.Add(Instruction.Create(OpCodes.Ldstr, "crash_report.txt"));
-        ci.Add(Instruction.Create(OpCodes.Call, pathCombineMethod));
+        // File.AppendAllText(Path.Combine(Path.GetTempPath(), "shieldbinary_crash.txt"), msg)
+        ci.Add(Instruction.Create(OpCodes.Call, getTempPathMethod));            // [tempDir]
+        ci.Add(Instruction.Create(OpCodes.Ldstr, "shieldbinary_crash.txt"));
+        ci.Add(Instruction.Create(OpCodes.Call, pathCombineMethod));            // [path]
         ci.Add(Instruction.Create(OpCodes.Ldloc, msgLocal));
         ci.Add(Instruction.Create(OpCodes.Call, appendAllTextMethod));
-        ci.Add(leaveIns);
-        ci.Add(catchPop);
-        ci.Add(finalRet);
+        ci.Add(tryLeave);       // leave.s → finalRet  (exits try block)
+
+        // Catch body: swallow so the handler itself can never crash
+        ci.Add(catchPop);       // pop exception off stack
+        ci.Add(catchLeave);     // leave.s → finalRet  (exits catch block — required in CIL)
+
+        ci.Add(finalRet);       // HandlerEnd / method exit
 
         crashBody.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
         {
             TryStart = tryNop,
-            TryEnd = catchPop,
-            HandlerStart = catchPop,
-            HandlerEnd = finalRet,
+            TryEnd = catchPop,       // exclusive: try body = [tryNop … tryLeave]
+            HandlerStart = catchPop, // catch body = [catchPop, catchLeave]
+            HandlerEnd = finalRet,   // exclusive: finalRet is after the handler
             CatchType = module.Import(typeof(Exception)).ScopeType,
         });
 
