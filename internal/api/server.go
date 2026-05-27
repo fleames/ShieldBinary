@@ -3,6 +3,7 @@ package api
 import (
 	_ "embed"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -171,8 +172,14 @@ func (s *Server) routes() {
 	if s.cfg.WebRoot != "" {
 		s.router.Static("/assets", s.cfg.WebRoot+"/assets")
 		s.router.NoRoute(func(c *gin.Context) {
-			if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
+			path := c.Request.URL.Path
+			if len(path) >= 4 && path[:4] == "/api" {
 				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+				return
+			}
+			candidate := s.cfg.WebRoot + path
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				c.File(candidate)
 				return
 			}
 			c.File(s.cfg.WebRoot + "/index.html")
