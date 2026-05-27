@@ -12,6 +12,8 @@ services:
       SHIELD_WEB_ROOT: /app/web
     env_file:
       - .env.prod
+    volumes:
+      - storage-data:/app/storage
     depends_on:
       - redis
 
