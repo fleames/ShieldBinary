@@ -1,0 +1,41 @@
+services:
+  api:
+    build: .
+    command: /app/api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3010:8080"
+    environment:
+      SHIELD_ENVIRONMENT: production
+      SHIELD_REDIS_ADDR: redis:6379
+      SHIELD_ENGINE_PATH: /app/engine/shieldbinary-engine
+      SHIELD_WEB_ROOT: /app/web
+    env_file:
+      - .env.prod
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    command: /app/worker
+    restart: unless-stopped
+    environment:
+      SHIELD_REDIS_ADDR: redis:6379
+      SHIELD_ENGINE_PATH: /app/engine/shieldbinary-engine
+    env_file:
+      - .env.prod
+    volumes:
+      - storage-data:/app/storage
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
+  storage-data:

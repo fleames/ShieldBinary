@@ -22,7 +22,7 @@ const TIERS: Tier[] = [
   {
     id: 'basic',
     name: 'Basic',
-    price: '$9',
+    price: 'Free (Beta)',
     summary: 'Core hardening with compatibility-first defaults.',
     techniques: [
       'String encryption',
@@ -42,7 +42,7 @@ const TIERS: Tier[] = [
   {
     id: 'pro',
     name: 'Pro',
-    price: '$39',
+    price: 'Free (Beta)',
     summary: 'Advanced obfuscation and constant/IL hardening.',
     techniques: [
       'Anti-ILDASM',
@@ -55,7 +55,7 @@ const TIERS: Tier[] = [
   {
     id: 'enterprise',
     name: 'Enterprise',
-    price: '$149',
+    price: 'Free (Beta)',
     summary: 'Maximum obfuscation stack for high-resistance scenarios.',
     techniques: [
       'Name obfuscation (random/sequential/unicode/unprintable)',

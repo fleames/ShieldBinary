@@ -3,28 +3,14 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
+import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Scan from './pages/Scan';
 import Tiers from './pages/Tiers';
 import Settings from './pages/Settings';
 import { Panel } from './design-system';
-
-const SETTINGS_KEY = 'shieldbinary_user_settings_v1';
-
-function applyStoredUiSettings() {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    const reduce = !!parsed.forceReducedMotion;
-    const compact = !!parsed.compactDensity;
-    document.body.classList.toggle('sb-reduced-motion-force', reduce);
-    document.body.classList.toggle('sb-density-compact', compact);
-  } catch {
-    document.body.classList.remove('sb-reduced-motion-force');
-    document.body.classList.remove('sb-density-compact');
-  }
-}
+import { applySettingsToBody, loadUserSettings } from './lib/userSettings';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -43,15 +29,23 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 function App() {
   useEffect(() => {
-    applyStoredUiSettings();
+    applySettingsToBody(loadUserSettings());
   }, []);
 
   return (
     <AuthProvider>
       <Routes>
+        {/* Public landing page */}
+        <Route path="/" element={<Layout hideUser />}>
+          <Route index element={<Landing />} />
+        </Route>
+
+        {/* Auth pages */}
         <Route path="/login" element={<Layout hideUser><Login /></Layout>} />
         <Route path="/register" element={<Layout hideUser><Register /></Layout>} />
-        <Route path="/" element={<Layout />}>
+
+        {/* Authenticated app */}
+        <Route path="/dashboard" element={<Layout />}>
           <Route
             index
             element={
@@ -60,31 +54,38 @@ function App() {
               </RequireAuth>
             }
           />
-          <Route
-            path="scan"
-            element={
+        </Route>
+        <Route
+          path="/scan"
+          element={
+            <Layout>
               <RequireAuth>
                 <Scan />
               </RequireAuth>
-            }
-          />
-          <Route
-            path="tiers"
-            element={
+            </Layout>
+          }
+        />
+        <Route
+          path="/tiers"
+          element={
+            <Layout>
               <RequireAuth>
                 <Tiers />
               </RequireAuth>
-            }
-          />
-          <Route
-            path="settings"
-            element={
+            </Layout>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <Layout>
               <RequireAuth>
                 <Settings />
               </RequireAuth>
-            }
-          />
-        </Route>
+            </Layout>
+          }
+        />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AuthProvider>

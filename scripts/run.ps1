@@ -35,14 +35,25 @@ Write-Host ''
 
 # --- Redis (optional) ---
 if (-not $NoRedis -and (Test-Command docker)) {
-    $redisRunning = docker ps -q -f "name=redis" 2>$null
-    if (-not $redisRunning) {
-        Write-Host "[Redis] Starting Redis in Docker..." -ForegroundColor Gray
-        Start-Process powershell -ArgumentList "-NoExit", "-Command", "docker run --rm -p 6379:6379 --name shieldbinary-redis redis:7-alpine" -WindowStyle Minimized
-        Start-Sleep -Seconds 2
-        Write-Host "[Redis] Running on localhost:6379" -ForegroundColor Green
+    $redisName = "shieldbinary-redis"
+    $redisVolume = "shieldbinary-redis-data"
+    $redisRunning = docker ps -q -f "name=^/$redisName$" 2>$null
+    if ($redisRunning) {
+        Write-Host "[Redis] Using existing running container ($redisName)" -ForegroundColor Green
+    } else {
+        $redisExists = docker ps -aq -f "name=^/$redisName$" 2>$null
+        if ($redisExists) {
+            Write-Host "[Redis] Starting existing container ($redisName)..." -ForegroundColor Gray
+            docker start $redisName | Out-Null
+            Start-Sleep -Seconds 1
+            Write-Host "[Redis] Running on localhost:6379" -ForegroundColor Green
+        } else {
+            Write-Host "[Redis] Creating persistent container ($redisName)..." -ForegroundColor Gray
+            docker run -d -p 6379:6379 --name $redisName -v "${redisVolume}:/data" redis:7-alpine --appendonly yes | Out-Null
+            Start-Sleep -Seconds 2
+            Write-Host "[Redis] Running on localhost:6379 (volume: $redisVolume)" -ForegroundColor Green
+        }
     }
-    else { Write-Host "[Redis] Using existing container" -ForegroundColor Green }
 } elseif (-not $NoRedis) {
     Write-Host "[Redis] Docker not found. Ensure Redis is running: docker run -p 6379:6379 redis:7-alpine" -ForegroundColor Yellow
 } else {

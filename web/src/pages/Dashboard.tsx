@@ -2,47 +2,49 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiErrorFromResponse } from '../lib/api';
 import { Alert, Badge, Button, Card, Panel, Progress, Select } from '../design-system';
+import { loadUserSettings, type ProtectionPreset } from '../lib/userSettings';
 
 const API = '/api/v1';
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
-const USER_SETTINGS_KEY = 'shieldbinary_user_settings_v1';
 
 const TIERS = [
   {
     id: 'minimal',
     name: 'Minimal',
-    price: 'Free',
+    price: 'Free (Beta)',
     desc: 'Maximum compatibility. .NET: symbol stripping, metadata cleanup only (no name/string obfuscation).',
   },
   {
     id: 'basic',
     name: 'Basic',
-    price: '$9',
+    price: 'Free (Beta)',
     desc: '.NET: symbol stripping, string encryption (no name obfuscation). Native: AES+compression packing.',
   },
   {
     id: 'pro',
     name: 'Pro',
-    price: '$39',
+    price: 'Free (Beta)',
     desc: '.NET: + control-flow flattening, constant encoding, dead code insertion. Native: + padding.',
   },
   {
     id: 'enterprise',
     name: 'Enterprise',
-    price: '$149',
+    price: 'Free (Beta)',
     desc: '.NET: same as Pro. Native: + extra XOR layer for stronger encryption.',
   },
 ];
 
 function readDefaultTierSetting(): string {
-  try {
-    const raw = localStorage.getItem(USER_SETTINGS_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    const requested = typeof parsed.defaultTier === 'string' ? parsed.defaultTier : 'basic';
-    return TIERS.some((t) => t.id === requested) ? requested : 'basic';
-  } catch {
-    return 'basic';
-  }
+  const requested = loadUserSettings().defaultTier;
+  return TIERS.some((t) => t.id === requested) ? requested : 'basic';
+}
+
+function readDefaultPresetSetting(): ProtectionPreset {
+  return loadUserSettings().defaultPreset;
+}
+
+function readPollIntervalSetting(): number {
+  return loadUserSettings().jobPollIntervalMs;
 }
 
 const ADVANCED_TECHNIQUES: { id: string; label: string; note?: string }[] = [
@@ -63,8 +65,6 @@ const ADVANCED_TECHNIQUES: { id: string; label: string; note?: string }[] = [
 ];
 
 type JobStatus = 'idle' | 'uploading' | 'queued' | 'processing' | 'completed' | 'failed';
-type ProtectionPreset = 'compatibility' | 'balanced' | 'polymorphic';
-
 const POLYMORPHIC_PRESET_PROTECTIONS = ['il_mutation'];
 const PRO_OR_ENTERPRISE_TIERS = new Set(['pro', 'enterprise']);
 
@@ -210,6 +210,7 @@ export default function Dashboard() {
   const [intelFlags, setIntelFlags] = useState<TechniqueFlag[]>([]);
   const [intelSubmittingJobId, setIntelSubmittingJobId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const initialPresetAppliedRef = useRef(false);
   const supportsAdvancedTechniques = PRO_OR_ENTERPRISE_TIERS.has(selectedTier);
   const supportsPolymorphicMode = PRO_OR_ENTERPRISE_TIERS.has(selectedTier);
   const supportsRenameMode = selectedTier === 'enterprise';
@@ -333,7 +334,7 @@ export default function Dashboard() {
         setStatus('failed');
         setError(e instanceof Error ? e.message : 'Failed to poll status');
       }
-    }, 1500);
+    }, readPollIntervalSetting());
   }, [stopPolling, authFetch, fetchJobs]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -394,6 +395,12 @@ export default function Dashboard() {
     setRenameMode('random');
     setSelectedProtections(POLYMORPHIC_PRESET_PROTECTIONS);
   }, [supportsPolymorphicMode]);
+
+  useEffect(() => {
+    if (initialPresetAppliedRef.current) return;
+    initialPresetAppliedRef.current = true;
+    applyPreset(readDefaultPresetSetting());
+  }, [applyPreset]);
 
   const handleProtect = useCallback(async () => {
     if (!file) return;

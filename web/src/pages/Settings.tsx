@@ -1,65 +1,38 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Alert, Badge, Button, Card, Checkbox, Select } from '../design-system';
-
-const SETTINGS_KEY = 'shieldbinary_user_settings_v1';
-
-type UserSettings = {
-  defaultTier: 'minimal' | 'basic' | 'pro' | 'enterprise';
-  forceReducedMotion: boolean;
-  compactDensity: boolean;
-};
-
-const DEFAULT_SETTINGS: UserSettings = {
-  defaultTier: 'basic',
-  forceReducedMotion: false,
-  compactDensity: false,
-};
-
-function loadSettings(): UserSettings {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw) as Partial<UserSettings>;
-    return {
-      defaultTier: parsed.defaultTier ?? DEFAULT_SETTINGS.defaultTier,
-      forceReducedMotion: !!parsed.forceReducedMotion,
-      compactDensity: !!parsed.compactDensity,
-    };
-  } catch {
-    return DEFAULT_SETTINGS;
-  }
-}
-
-function applySettingsToBody(s: UserSettings) {
-  document.body.classList.toggle('sb-reduced-motion-force', !!s.forceReducedMotion);
-  document.body.classList.toggle('sb-density-compact', !!s.compactDensity);
-}
+import {
+  DEFAULT_USER_SETTINGS,
+  applySettingsToBody,
+  loadUserSettings,
+  saveUserSettings,
+  type UserSettings,
+} from '../lib/userSettings';
 
 export default function Settings() {
   const { user, token, logout } = useAuth();
-  const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const hasToken = useMemo(() => !!token, [token]);
 
   useEffect(() => {
-    const current = loadSettings();
+    const current = loadUserSettings();
     setSettings(current);
     applySettingsToBody(current);
   }, []);
 
   const saveSettings = () => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    saveUserSettings(settings);
     applySettingsToBody(settings);
     setSaved(true);
     setTimeout(() => setSaved(false), 1400);
   };
 
   const resetSettings = () => {
-    setSettings(DEFAULT_SETTINGS);
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(DEFAULT_SETTINGS));
-    applySettingsToBody(DEFAULT_SETTINGS);
+    setSettings(DEFAULT_USER_SETTINGS);
+    saveUserSettings(DEFAULT_USER_SETTINGS);
+    applySettingsToBody(DEFAULT_USER_SETTINGS);
     setSaved(true);
     setTimeout(() => setSaved(false), 1400);
   };
@@ -73,6 +46,11 @@ export default function Settings() {
     } catch {
       setCopied(false);
     }
+  };
+
+  const handleLogout = () => {
+    if (settings.confirmBeforeLogout && !window.confirm('Log out of your account now?')) return;
+    logout();
   };
 
   return (
@@ -98,7 +76,7 @@ export default function Settings() {
             <Button variant="ghost" size="sm" onClick={copyUserId} disabled={!user?.id}>
               {copied ? 'Copied' : 'Copy user ID'}
             </Button>
-            <Button variant="danger" size="sm" onClick={logout}>
+            <Button variant="danger" size="sm" onClick={handleLogout}>
               Log out
             </Button>
           </div>
@@ -125,6 +103,41 @@ export default function Settings() {
               </Select>
             </label>
 
+            <label style={{ display: 'grid', gap: '0.35rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              Default preset profile
+              <Select
+                value={settings.defaultPreset}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    defaultPreset: e.target.value as UserSettings['defaultPreset'],
+                  }))
+                }
+              >
+                <option value="compatibility">Compatibility</option>
+                <option value="balanced">Balanced</option>
+                <option value="polymorphic">Polymorphic</option>
+              </Select>
+            </label>
+
+            <label style={{ display: 'grid', gap: '0.35rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              Dashboard job poll interval
+              <Select
+                value={String(settings.jobPollIntervalMs)}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    jobPollIntervalMs: Number(e.target.value) as UserSettings['jobPollIntervalMs'],
+                  }))
+                }
+              >
+                <option value="1000">Fast (1.0s)</option>
+                <option value="1500">Default (1.5s)</option>
+                <option value="2500">Balanced (2.5s)</option>
+                <option value="4000">Low traffic (4.0s)</option>
+              </Select>
+            </label>
+
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
               <Checkbox
                 checked={settings.forceReducedMotion}
@@ -143,6 +156,16 @@ export default function Settings() {
                 }
               />
               <span>Compact density (tighter spacing)</span>
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <Checkbox
+                checked={settings.confirmBeforeLogout}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, confirmBeforeLogout: e.target.checked }))
+                }
+              />
+              <span>Ask confirmation before log out</span>
             </label>
           </div>
 

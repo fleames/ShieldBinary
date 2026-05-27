@@ -1,6 +1,7 @@
 import { Outlet, Link, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Badge, Button } from '../design-system';
+import { loadUserSettings } from '../lib/userSettings';
 
 type LayoutProps = { children?: React.ReactNode; hideUser?: boolean };
 
@@ -9,6 +10,11 @@ export default function Layout({ children, hideUser }: LayoutProps) {
   const location = useLocation();
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register';
   const showUser = !hideUser && !isAuthPage && user;
+  const handleLogout = () => {
+    const settings = loadUserSettings();
+    if (settings.confirmBeforeLogout && !window.confirm('Log out of your account now?')) return;
+    logout();
+  };
 
   return (
     <div className="app-shell">
@@ -19,7 +25,7 @@ export default function Layout({ children, hideUser }: LayoutProps) {
               ShieldBinary <span className="sb-brand__glow">Nexus</span>
             </Link>
             {showUser && (
-              <NavLink to="/" end className={({ isActive }) => `sb-nav-link${isActive ? ' active' : ''}`}>
+              <NavLink to="/dashboard" className={({ isActive }) => `sb-nav-link${isActive ? ' active' : ''}`}>
                 Protect
               </NavLink>
             )}
@@ -46,7 +52,7 @@ export default function Layout({ children, hideUser }: LayoutProps) {
           {showUser && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
               <Badge tone="neutral">{user.email}</Badge>
-              <Button variant="ghost" size="sm" onClick={logout}>
+              <Button variant="ghost" size="sm" onClick={handleLogout}>
                 Log out
               </Button>
             </div>

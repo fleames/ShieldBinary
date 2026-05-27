@@ -611,7 +611,8 @@ func (s *Server) handleDownloadJob(c *gin.Context) {
 	if ext == "" {
 		ext = ".dll"
 	}
-	c.Header("Content-Disposition", "attachment; filename=protected"+ext)
+	randomName := "protected-" + uuid.NewString() + ext
+	c.Header("Content-Disposition", "attachment; filename="+randomName)
 	c.Header("Content-Type", "application/octet-stream")
 
 	if _, err := io.Copy(c.Writer, rc); err != nil {
