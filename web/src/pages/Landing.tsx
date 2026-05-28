@@ -89,7 +89,7 @@ const BENEFITS = [
 
 const TECH_DEPTH = [
   {
-    label: 'IL Virtualization',
+    label: 'IL Virtualization (.NET)',
     color: 'var(--blue)',
     detail: 'Converts .NET method bodies to a custom bytecode VM. Each method gets a unique opcode table — standard devirtualizers find nothing to latch onto.',
   },
@@ -97,6 +97,16 @@ const TECH_DEPTH = [
     label: 'Control-Flow Flattening',
     color: 'var(--purple)',
     detail: 'Converts linear blocks into a switch-dispatch state machine. IDA Pro and Binary Ninja produce spaghetti graphs; static analysis yields no useful CFG.',
+  },
+  {
+    label: 'JVM Name Obfuscation',
+    color: 'var(--blue)',
+    detail: 'Renames every class, remaps all descriptors and type references via ASM ClassRemapper. Decompiled output shows a/A, a/B… with no relationship to original names.',
+  },
+  {
+    label: 'JVM String Encryption',
+    color: '#f5a020',
+    detail: 'Replaces all string literals with XOR-encrypted constants and injects a synthetic decryptor class. Each string gets an independent key — bulk decryption scripts fail.',
   },
   {
     label: 'Anti-Debug',
@@ -124,7 +134,7 @@ const STEPS = [
   {
     n: '01',
     title: 'Upload your binary',
-    body: 'Drop a .exe or .dll — up to 100 MB. We auto-detect .NET vs. native PE. No account setup beyond email.',
+    body: 'Drop a .exe, .dll, or .jar — up to 100 MB. We auto-detect .NET, Java/Kotlin, and native PE. No account setup beyond email.',
   },
   {
     n: '02',
@@ -171,6 +181,23 @@ const TIERS = [
     techniques: ['Name obfuscation', 'Control-flow flattening', 'Anti-debug', 'Anti-tamper', 'Polymorphic mode'],
     featured: true,
   },
+];
+
+const TERMINAL_LINES_JAR = [
+  { type: 'prompt', text: 'ghostbinary protect --tier enterprise ./Payments.jar' },
+  { type: 'gap' },
+  { type: 'info',   label: 'Detected', text: 'Java/Kotlin JAR · 52 classes · JVM 17' },
+  { type: 'gap' },
+  { type: 'ok',     label: 'Debug strip',     text: 'LineNumberTable · LocalVariable removed (52 classes)' },
+  { type: 'ok',     label: 'String encrypt',  text: '287 literals → XOR-encrypted, per-string keys' },
+  { type: 'ok',     label: 'Name obfuscation',text: '52 classes → a/A … a/z, a/AA … (ClassRemapper)' },
+  { type: 'ok',     label: 'Control flow',    text: '87 methods → opaque predicate injection' },
+  { type: 'ok',     label: 'Anti-decompiler', text: 'ACC_SYNTHETIC on 312 methods' },
+  { type: 'gap' },
+  { type: 'metric', label: 'Score', text: '88 / 100  · Hardened' },
+  { type: 'metric', label: 'Size',  text: '241 KB  (+48%)' },
+  { type: 'gap' },
+  { type: 'done',   text: 'Protected output ready for download.' },
 ];
 
 const TERMINAL_LINES = [
@@ -409,7 +436,7 @@ export default function Landing() {
             color: 'var(--text-muted)',
             flexWrap: 'wrap',
           }}>
-            {['.NET assemblies', 'Native Win32/x64 PE', 'API-first'].map((t, i) => (
+            {['.NET assemblies', 'Java / Kotlin (.jar)', 'Native Win32/x64 PE', 'API-first'].map((t, i) => (
               <span key={t} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 {i > 0 && <span style={{ opacity: 0.3 }}>·</span>}
                 {t}
@@ -458,6 +485,76 @@ export default function Landing() {
               marginBottom: '0.3rem',
             }}>{s.value}</div>
             <div style={{ fontSize: '0.77rem', color: 'var(--text-muted)', fontWeight: 500 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Supported runtimes ── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        gap: '0.75rem',
+        marginBottom: '4rem',
+        animation: 'gb-fade-up 0.6s 0.12s var(--ease-out) both',
+      }}>
+        {[
+          {
+            lang: '.NET / C#',
+            ext: '.exe · .dll',
+            color: 'var(--purple)',
+            glow: 'rgba(146,101,255,0.13)',
+            border: 'rgba(146,101,255,0.28)',
+            techniques: ['IL virtualization', 'Control-flow flattening', 'Anti-debug / Anti-tamper', 'Name obfuscation'],
+          },
+          {
+            lang: 'Java / Kotlin',
+            ext: '.jar',
+            color: '#f5a020',
+            glow: 'rgba(245,160,32,0.11)',
+            border: 'rgba(245,160,32,0.28)',
+            techniques: ['Debug info strip', 'String XOR encryption', 'Class name obfuscation', 'Opaque predicate CFG'],
+            badge: 'New',
+          },
+          {
+            lang: 'Native PE',
+            ext: '.exe · .dll (Win32/x64)',
+            color: '#1fcf78',
+            glow: 'rgba(31,207,120,0.11)',
+            border: 'rgba(31,207,120,0.25)',
+            techniques: ['AES-GCM section encryption', 'Compression + padding', 'Per-binary derived key', 'Minimal loader stub'],
+          },
+        ].map((r) => (
+          <div key={r.lang} style={{
+            padding: '1.25rem 1.3rem',
+            borderRadius: 'var(--r-lg)',
+            background:
+              'linear-gradient(var(--bg-elevated), var(--bg-elevated)) padding-box,' +
+              `linear-gradient(140deg, ${r.border} 0%, rgba(255,255,255,0.04) 100%) border-box`,
+            border: '1px solid transparent',
+            boxShadow: 'var(--shadow-1)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+              <span style={{ fontWeight: 700, fontSize: '0.95rem', letterSpacing: '-0.01em' }}>{r.lang}</span>
+              {r.badge && (
+                <span style={{
+                  fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  padding: '0.15rem 0.48rem', borderRadius: 'var(--r-pill)',
+                  background: 'rgba(245,160,32,0.14)', border: '1px solid rgba(245,160,32,0.35)',
+                  color: '#f5a020',
+                }}>{r.badge}</span>
+              )}
+            </div>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '0.85rem', fontFamily: 'var(--font-mono)' }}>
+              {r.ext}
+            </div>
+            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '0.22rem' }}>
+              {r.techniques.map((t) => (
+                <li key={t} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  <span style={{ color: r.color, fontSize: '0.7rem' }}>✓</span>
+                  {t}
+                </li>
+              ))}
+            </ul>
           </div>
         ))}
       </div>
@@ -611,6 +708,94 @@ export default function Landing() {
         </div>
       </div>
 
+      {/* ── Java/Kotlin terminal showcase ── */}
+      <div style={{
+        borderRadius: 'var(--r-xl)',
+        overflow: 'hidden',
+        background:
+          'linear-gradient(#020407, #020407) padding-box,' +
+          'linear-gradient(135deg, rgba(245,160,32,0.3), rgba(80,144,255,0.18)) border-box',
+        border: '1px solid transparent',
+        boxShadow: 'var(--shadow-lg), 0 0 80px rgba(245,160,32,0.05)',
+        marginBottom: '4rem',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '0.48rem',
+          padding: '0.82rem 1.2rem',
+          borderBottom: '1px solid rgba(255,255,255,0.055)',
+          background: 'rgba(255,255,255,0.022)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.48rem' }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ff5f57', display: 'block' }}/>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#febc2e', display: 'block' }}/>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#28c840', display: 'block' }}/>
+            <span style={{
+              marginLeft: '0.55rem',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.72rem',
+              color: 'rgba(255,255,255,0.25)',
+            }}>
+              ghostbinary — java/kotlin enterprise protection
+            </span>
+          </div>
+          <span style={{
+            fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+            padding: '0.15rem 0.48rem', borderRadius: 'var(--r-pill)',
+            background: 'rgba(245,160,32,0.14)', border: '1px solid rgba(245,160,32,0.35)',
+            color: '#f5a020',
+          }}>New</span>
+        </div>
+        <div style={{
+          padding: '1.4rem 1.65rem',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.81rem',
+          lineHeight: 1.85,
+        }}>
+          {TERMINAL_LINES_JAR.map((line, i) => {
+            if (line.type === 'gap') return <div key={i} style={{ height: '0.4rem' }} />;
+            if (line.type === 'prompt') return (
+              <div key={i} style={{ color: 'var(--text)' }}>
+                <span style={{ color: '#f5a020', marginRight: '0.5rem', userSelect: 'none' }}>Ghost@Binary:~$</span>
+                {line.text}
+                <span style={{
+                  display: 'inline-block', width: '0.5em', height: '1.1em',
+                  background: '#f5a020', marginLeft: '0.2em', verticalAlign: 'text-bottom',
+                  animation: 'gb-blink 1s step-end infinite',
+                }} />
+              </div>
+            );
+            if (line.type === 'info') return (
+              <div key={i} style={{ color: 'var(--text-muted)' }}>
+                <span style={{ color: 'rgba(255,255,255,0.3)', marginRight: '0.5rem' }}>›</span>
+                <span style={{ color: 'var(--text-muted)', marginRight: '0.4rem' }}>{line.label}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{line.text}</span>
+              </div>
+            );
+            if (line.type === 'ok') return (
+              <div key={i} style={{ display: 'flex', gap: '0.5rem', color: 'rgba(255,255,255,0.5)' }}>
+                <span style={{ color: 'var(--success)', userSelect: 'none' }}>✓</span>
+                <span style={{ color: 'rgba(134,150,186,0.7)', minWidth: '148px', flexShrink: 0 }}>{line.label}</span>
+                <span>{line.text}</span>
+              </div>
+            );
+            if (line.type === 'metric') return (
+              <div key={i} style={{ display: 'flex', gap: '0.5rem' }}>
+                <span style={{ color: '#f5a020', userSelect: 'none' }}>›</span>
+                <span style={{ color: 'var(--text-muted)', minWidth: '148px', flexShrink: 0 }}>{line.label}</span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{line.text}</span>
+              </div>
+            );
+            if (line.type === 'done') return (
+              <div key={i} style={{ color: 'var(--success)', fontWeight: 600 }}>{line.text}</div>
+            );
+            return null;
+          })}
+        </div>
+      </div>
+
       {/* ── How it works ── */}
       <div style={{
         padding: '2.25rem 2.25rem',
@@ -715,7 +900,7 @@ export default function Landing() {
         </div>
 
         <p style={{ textAlign: 'center', marginTop: '1.1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-          + 14 more optional techniques including resource encryption, reference proxying, dynamic method generation, and runtime RASP.
+          + 14 more optional .NET techniques including resource encryption, reference proxying, dynamic method generation, and runtime RASP. Java/Kotlin support is in active development.
         </p>
       </div>
 
