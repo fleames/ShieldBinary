@@ -40,7 +40,6 @@ public class ControlFlowObfuscationPass implements IProtectionPass {
 
             if (modified) {
                 ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS) {
-                    @Override
                     protected String getCommonSuperclass(String t1, String t2) {
                         return "java/lang/Object";
                     }

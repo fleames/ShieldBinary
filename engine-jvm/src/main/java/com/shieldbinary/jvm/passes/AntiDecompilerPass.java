@@ -16,7 +16,6 @@ public class AntiDecompilerPass implements IProtectionPass {
             if (entry.getKey().startsWith("__")) continue;
             ClassReader cr = new ClassReader(entry.getValue());
             ClassWriter cw = new ClassWriter(0) {
-                @Override
                 protected String getCommonSuperclass(String t1, String t2) {
                     return "java/lang/Object";
                 }

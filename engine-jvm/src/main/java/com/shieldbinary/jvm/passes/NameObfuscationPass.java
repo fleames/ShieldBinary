@@ -51,7 +51,6 @@ public class NameObfuscationPass implements IProtectionPass {
             String internalName = e.getKey().replace(".class", "");
             ClassReader cr = new ClassReader(e.getValue());
             ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS) {
-                @Override
                 protected String getCommonSuperclass(String t1, String t2) {
                     return "java/lang/Object";
                 }

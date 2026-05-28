@@ -19,7 +19,6 @@ public class StringEncryptionPass implements IProtectionPass {
             if (entry.getKey().startsWith("__")) continue;
             ClassReader cr = new ClassReader(entry.getValue());
             ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS) {
-                @Override
                 protected String getCommonSuperclass(String t1, String t2) {
                     return "java/lang/Object";
                 }
@@ -43,7 +42,6 @@ public class StringEncryptionPass implements IProtectionPass {
                                          String sig, String[] ex) {
             MethodVisitor mv = super.visitMethod(access, name, desc, sig, ex);
             return new MethodVisitor(Opcodes.ASM9, mv) {
-                @Override
                 public void visitLdcInsn(Object cst) {
                     if (cst instanceof String s && !s.isEmpty()) {
                         int key = ctx.getRandom().nextInt(254) + 1; // 1–254
@@ -69,7 +67,6 @@ public class StringEncryptionPass implements IProtectionPass {
     // Generate the __Sb helper class containing the string decryptor.
     static byte[] buildDecryptorClass() {
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES) {
-            @Override
             protected String getCommonSuperclass(String t1, String t2) {
                 return "java/lang/Object";
             }
