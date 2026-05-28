@@ -169,8 +169,8 @@ func (s *Server) handleUpload(c *gin.Context) {
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(file.Filename))
-	if ext != ".exe" && ext != ".dll" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only .exe and .dll allowed"})
+	if ext != ".exe" && ext != ".dll" && ext != ".jar" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only .exe, .dll, and .jar files are allowed"})
 		return
 	}
 
@@ -181,15 +181,22 @@ func (s *Server) handleUpload(c *gin.Context) {
 	}
 	defer f.Close()
 
-	// Validate PE magic (MZ header)
-	header := make([]byte, 2)
+	// Validate file magic bytes: MZ for PE, PK for JAR/ZIP
+	header := make([]byte, 4)
 	if _, err := io.ReadFull(f, header); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file too small or unreadable"})
 		return
 	}
-	if header[0] != 0x4D || header[1] != 0x5A {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "not a valid PE file (missing MZ header)"})
-		return
+	if ext == ".jar" {
+		if header[0] != 0x50 || header[1] != 0x4B || header[2] != 0x03 || header[3] != 0x04 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not a valid JAR file (missing ZIP magic)"})
+			return
+		}
+	} else {
+		if header[0] != 0x4D || header[1] != 0x5A {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not a valid PE file (missing MZ header)"})
+			return
+		}
 	}
 	r := io.MultiReader(bytes.NewReader(header), f)
 
@@ -221,8 +228,8 @@ func (s *Server) handleScan(c *gin.Context) {
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(file.Filename))
-	if ext != ".exe" && ext != ".dll" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only .exe and .dll allowed"})
+	if ext != ".exe" && ext != ".dll" && ext != ".jar" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only .exe, .dll, and .jar files are allowed"})
 		return
 	}
 	f, err := file.Open()

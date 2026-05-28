@@ -263,7 +263,7 @@ export default function Dashboard() {
     e.preventDefault();
     setDragOver(false);
     const f = e.dataTransfer.files[0];
-    if (f && (f.name.endsWith('.exe') || f.name.endsWith('.dll'))) {
+    if (f && (f.name.endsWith('.exe') || f.name.endsWith('.dll') || f.name.endsWith('.jar'))) {
       if (f.size > MAX_FILE_SIZE) { setError(`File too large (max ${MAX_FILE_SIZE / 1024 / 1024} MB)`); return; }
       setFile(f); setError(null);
     }
@@ -562,7 +562,7 @@ export default function Dashboard() {
       >
         <input
           type="file"
-          accept=".exe,.dll"
+          accept=".exe,.dll,.jar"
           onChange={handleFileSelect}
           style={{ display: 'none' }}
           id="file-upload"
@@ -598,6 +598,7 @@ export default function Dashboard() {
             <div className="dash-upload-zone__chips">
               <span className="dash-upload-chip">.exe</span>
               <span className="dash-upload-chip">.dll</span>
+              <span className="dash-upload-chip">.jar</span>
               <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>max 100 MB</span>
             </div>
           </>

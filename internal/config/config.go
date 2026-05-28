@@ -38,6 +38,9 @@ type Config struct {
 	// Native PE loader stub path (for packing native binaries)
 	NativeLoaderPath string `mapstructure:"native_loader_path"`
 
+	// JVM engine JAR path (for protecting Java/Kotlin JARs)
+	JvmEnginePath string `mapstructure:"jvm_engine_path"`
+
 	// Compatibility check (post-protection verification)
 	EnableCompatCheck       bool   `mapstructure:"enable_compat_check"`
 	CompatCheckMode         string `mapstructure:"compat_check_mode"` // container|windows_vm
@@ -156,6 +159,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("SHIELD_NATIVE_LOADER_PATH"); v != "" {
 		cfg.NativeLoaderPath = v
+	}
+	if v := os.Getenv("SHIELD_JVM_ENGINE_PATH"); v != "" {
+		cfg.JvmEnginePath = v
 	}
 	if v := os.Getenv("SHIELD_WEB_ROOT"); v != "" {
 		cfg.WebRoot = v

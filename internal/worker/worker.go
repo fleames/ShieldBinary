@@ -136,6 +136,17 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 
 	outputPath := filepath.Join(workDir, "output"+inputExt)
 
+	detectedType := "native"
+	var obs *engineObservability
+
+	// Route JAR files to the JVM engine before PE detection
+	if strings.ToLower(inputExt) == ".jar" {
+		if err := w.runJvmEngine(ctx, job.ID, inputPath, outputPath, job.Tier); err != nil {
+			w.failJob(ctx, job.ID, err.Error())
+			return
+		}
+		detectedType = "jar"
+	} else {
 	// Detect .NET vs native PE and route to appropriate engine
 	isDotNet, err := peutil.IsDotNet(inputPath)
 	if err != nil {
@@ -143,8 +154,6 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 		return
 	}
 
-	detectedType := "native"
-	var obs *engineObservability
 	if isDotNet {
 		// Run .NET engine
 		o, err := w.runDotNetEngine(ctx, job.ID, workDir, inputPath, outputPath, job.Tier, job.LowEntropy, job.Polymorphic, job.Protections)
@@ -187,6 +196,7 @@ func (w *Worker) processJob(ctx context.Context, job *queue.JobPayload) {
 			return
 		}
 	}
+	} // end else (non-JAR path)
 
 	if obs != nil {
 		if len(obs.PassMetrics) > 0 {
@@ -409,6 +419,51 @@ func (w *Worker) runNativePacker(ctx context.Context, jobID, inputPath, outputPa
 	if err := nativepacker.Pack(inputPath, outputPath, loaderPath, tier); err != nil {
 		w.logger.Error("native packer failed", zap.Error(err))
 		return fmt.Errorf("native pack failed: %w", err)
+	}
+	return nil
+}
+
+func (w *Worker) runJvmEngine(ctx context.Context, jobID, inputPath, outputPath, tier string) error {
+	javaPath, err := exec.LookPath("java")
+	if err != nil {
+		return fmt.Errorf("java not found in PATH; install JRE 17+ to protect JARs")
+	}
+
+	enginePath := w.cfg.JvmEnginePath
+	if enginePath == "" {
+		for _, p := range []string{
+			"bin/engine-jvm/shieldbinary-jvm-engine.jar",
+			"engine-jvm/build/libs/shieldbinary-jvm-engine.jar",
+		} {
+			if _, err := os.Stat(p); err == nil {
+				enginePath = p
+				break
+			}
+		}
+	}
+	if enginePath == "" {
+		execPath, _ := os.Executable()
+		candidate := filepath.Join(filepath.Dir(execPath), "engine-jvm", "shieldbinary-jvm-engine.jar")
+		if _, err := os.Stat(candidate); err == nil {
+			enginePath = candidate
+		}
+	}
+	if enginePath == "" {
+		return fmt.Errorf("JVM engine not found; build with: cd engine-jvm && ./gradlew shadowJar && mkdir -p ../../bin/engine-jvm && cp build/libs/shieldbinary-jvm-engine.jar ../../bin/engine-jvm/")
+	}
+	if abs, err := filepath.Abs(enginePath); err == nil {
+		enginePath = abs
+	}
+
+	cmd := exec.CommandContext(ctx, javaPath, "-jar", enginePath, inputPath, outputPath, tier)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		w.logger.Error("JVM engine failed", zap.Error(err), zap.String("output", string(out)))
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("%s", msg)
 	}
 	return nil
 }
