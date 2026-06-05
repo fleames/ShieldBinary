@@ -752,18 +752,6 @@ export default function Landing() {
           </div>
         </div>
 
-        {/* ── Directory badges ── */}
-        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '2.5rem', paddingBottom: '1rem', opacity: 0.85 }}>
-          <a
-            href="https://launchpadly.co/startup/ghostbinary"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-launchpadly-badge="ghostbinary"
-            data-launchpadly-badge-variant="listed-on"
-          >
-            <img src="https://launchpadly.co/embed/badges/startup/ghostbinary.svg?variant=listed-on" alt="Listed on Launchpadly Startup Directory" width="260" height="48" style={{ display: 'block', border: 0 }} />
-          </a>
-        </div>
 
       </div>
     </div>
